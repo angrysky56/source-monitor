@@ -63,6 +63,7 @@ def tokenize_with_provenance(
     tokenizer: Any,
     trace: Trace,
     device: str = "cpu",
+    skip_prefix_check: bool = False,
 ) -> tuple[Tensor, list[SpanAnnotation]]:
     """Tokenize the trace and find exact token spans for each assistant turn content.
 
@@ -92,7 +93,8 @@ def tokenize_with_provenance(
     offsets = encoding["offset_mapping"][0].tolist()  # list of (start, end) char index
     
     # Check prefix stability (fails closed if violated)
-    check_prefix_stability(tokenizer, trace)
+    if not skip_prefix_check:
+        check_prefix_stability(tokenizer, trace)
     
     # Locate each turn's content and location text within full_text
     spans: list[SpanAnnotation] = []

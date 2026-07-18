@@ -197,7 +197,7 @@ def contrastive_slot_scores(
             )
             
             # Tokenize on CPU to allow padding
-            cand_ids, cand_spans = tokenize_with_provenance(tokenizer, cand_trace, "cpu")
+            cand_ids, cand_spans = tokenize_with_provenance(tokenizer, cand_trace, "cpu", skip_prefix_check=True)
             cand_ids_list.append(cand_ids)
             cand_spans_list.append(cand_spans)
             
