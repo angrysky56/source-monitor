@@ -20,9 +20,10 @@ from source_monitor.llm.task_render import Trace, Turn
 @dataclass
 class SpanAnnotation:
     """Token-level annotation for a turn's content."""
-    start_token: int              # inclusive token index in full sequence
-    end_token: int                # exclusive token index
-    kind: str                     # "system" | "user" | "assistant"
+
+    start_token: int  # inclusive token index in full sequence
+    end_token: int  # exclusive token index
+    kind: str  # "system" | "user" | "assistant"
     step_index: int | None
     is_corrupted: bool
     claim_surface: str | None = None
@@ -40,10 +41,7 @@ def check_prefix_stability(tokenizer: Any, trace: Trace) -> None:
     turns = trace.turns
     prev_render = ""
     for i in range(1, len(turns) + 1):
-        sub_turns = [
-            {"role": t.role, "content": t.content}
-            for t in turns[:i]
-        ]
+        sub_turns = [{"role": t.role, "content": t.content} for t in turns[:i]]
         curr_render = tokenizer.apply_chat_template(
             sub_turns,
             tokenize=False,
@@ -71,18 +69,15 @@ def tokenize_with_provenance(
     A4: Returns location slot boundaries inside each assistant turn.
     """
     # Convert Trace turns to HF chat template list of dicts
-    chat_turns = [
-        {"role": t.role, "content": t.content}
-        for t in trace.turns
-    ]
-    
+    chat_turns = [{"role": t.role, "content": t.content} for t in trace.turns]
+
     # Render full text
     full_text = tokenizer.apply_chat_template(
         chat_turns,
         tokenize=False,
         add_generation_prompt=False,
     )
-    
+
     # Tokenize and get offset mappings
     encoding = tokenizer(
         full_text,
@@ -91,23 +86,25 @@ def tokenize_with_provenance(
     )
     input_ids = encoding["input_ids"].to(device)
     offsets = encoding["offset_mapping"][0].tolist()  # list of (start, end) char index
-    
+
     # Check prefix stability (fails closed if violated)
     if not skip_prefix_check:
         check_prefix_stability(tokenizer, trace)
-    
+
     # Locate each turn's content and location text within full_text
     spans: list[SpanAnnotation] = []
     search_pos = 0
-    
+
     for turn in trace.turns:
         # Find this turn's content in full_text
         start_char = full_text.find(turn.content, search_pos)
         if start_char == -1:
-            raise ValueError(f"Could not find turn content {turn.content!r} in full text.")
+            raise ValueError(
+                f"Could not find turn content {turn.content!r} in full text."
+            )
         end_char = start_char + len(turn.content)
         search_pos = end_char
-        
+
         # Map character offsets to tokens
         content_tokens = []
         for t_idx, (tok_start, tok_end) in enumerate(offsets):
@@ -117,7 +114,7 @@ def tokenize_with_provenance(
             # Token is inside the content range
             if tok_start >= start_char and tok_end <= end_char:
                 content_tokens.append(t_idx)
-                
+
         if not content_tokens:
             # Empty content (like system prompt or empty turns)
             start_tok = end_tok = 0
@@ -125,7 +122,7 @@ def tokenize_with_provenance(
             start_tok = content_tokens[0]
             # exclusive end
             end_tok = content_tokens[-1] + 1
-            
+
         # Find location text boundaries (A4) if present
         loc_start_tok = None
         loc_end_tok = None
@@ -134,7 +131,7 @@ def tokenize_with_provenance(
             if loc_idx != -1:
                 loc_start_char = start_char + loc_idx
                 loc_end_char = loc_start_char + len(turn.location_text)
-                
+
                 loc_tokens = []
                 for t_idx in content_tokens:
                     tok_start, tok_end = offsets[t_idx]
@@ -143,7 +140,7 @@ def tokenize_with_provenance(
                 if loc_tokens:
                     loc_start_tok = loc_tokens[0]
                     loc_end_tok = loc_tokens[-1] + 1
-                    
+
         spans.append(
             SpanAnnotation(
                 start_token=start_tok,
@@ -156,5 +153,5 @@ def tokenize_with_provenance(
                 location_end_token=loc_end_tok,
             )
         )
-        
+
     return input_ids, spans
