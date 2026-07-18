@@ -129,6 +129,7 @@ def contrastive_slot_scores(
     """Compute candidate-renormalized surprisal at each assistant turn slot (Phase 0b).
 
     C(s) = CONTAINER_NAMES ∪ ["nowhere"].
+    Optimized: Evaluates all candidates in a single batched forward pass.
     """
     import math
     from source_monitor.llm.task_render import CONTAINER_NAMES, Turn, Trace
@@ -136,6 +137,10 @@ def contrastive_slot_scores(
     
     candidates = list(CONTAINER_NAMES) + ["nowhere"]
     scores: list[SpanScore] = []
+    
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = 0
     
     # Iterate over all assistant turns
     for turn_idx, turn in enumerate(trace.turns):
@@ -145,8 +150,9 @@ def contrastive_slot_scores(
         step_k = turn.step_index
         assert step_k is not None
         
-        # We need to score each candidate c
-        lp_candidates = {}
+        # Prepare list to batch tokenize
+        cand_ids_list = []
+        cand_spans_list = []
         
         for c in candidates:
             # Construct candidate content
@@ -157,7 +163,7 @@ def contrastive_slot_scores(
                 cand_content = f"The {trace.query_object} is in {c}."
                 claim_surf = "container"
                 
-            # Create a candidate trace prefix + candidate turn
+            # Create candidate trace prefix + candidate turn
             cand_turns = []
             for t in trace.turns[:turn_idx]:
                 cand_turns.append(
@@ -171,7 +177,6 @@ def contrastive_slot_scores(
                         location_text=t.location_text,
                     )
                 )
-            # Append the candidate turn
             cand_turns.append(
                 Turn(
                     role="assistant",
@@ -191,30 +196,51 @@ def contrastive_slot_scores(
                 task=trace.task,
             )
             
-            # Tokenize candidate trace
-            cand_ids, cand_spans = tokenize_with_provenance(tokenizer, cand_trace, device)
+            # Tokenize on CPU to allow padding
+            cand_ids, cand_spans = tokenize_with_provenance(tokenizer, cand_trace, "cpu")
+            cand_ids_list.append(cand_ids)
+            cand_spans_list.append(cand_spans)
             
-            # Run model forward pass
-            outputs = model(cand_ids)
-            log_probs = F.log_softmax(outputs.logits.float(), dim=-1)
+        # Batched padding and collation
+        max_L = max(ids.shape[1] for ids in cand_ids_list)
+        batch_ids = torch.full((len(candidates), max_L), pad_token_id, dtype=torch.long)
+        batch_mask = torch.zeros((len(candidates), max_L), dtype=torch.long)
+        
+        for i, cand_ids in enumerate(cand_ids_list):
+            L_i = cand_ids.shape[1]
+            batch_ids[i, :L_i] = cand_ids[0]
+            batch_mask[i, :L_i] = 1
             
-            # The last span is the candidate assistant turn
-            span = cand_spans[-1]
+        batch_ids = batch_ids.to(device)
+        batch_mask = batch_mask.to(device)
+        
+        # Batched forward pass: (9, max_L, V)
+        outputs = model(batch_ids, attention_mask=batch_mask)
+        
+        # Calculate log probabilities of vocabulary: (9, max_L, V)
+        log_probs = F.log_softmax(outputs.logits.float(), dim=-1)
+        
+        lp_candidates = {}
+        
+        for i, c in enumerate(candidates):
+            span = cand_spans_list[i][-1]
+            cand_ids = cand_ids_list[i]
             
-            # Aggregation (a): content mean
+            # Content tokens
             content_tokens = list(range(span.start_token, span.end_token))
             neg_logps_content = []
             for pos in content_tokens:
                 if pos <= 0:
                     continue
                 token_id = int(cand_ids[0, pos])
-                lp = float(log_probs[0, pos - 1, token_id])
+                # Access i-th batch element in log_probs
+                lp = float(log_probs[i, pos - 1, token_id])
                 neg_logps_content.append(lp)
                 
             mean_lp = sum(neg_logps_content) / len(neg_logps_content) if neg_logps_content else 0.0
             max_neg_lp = min(neg_logps_content) if neg_logps_content else 0.0
             
-            # Aggregation (c): slot only
+            # Slot tokens
             slot_tokens = []
             if span.location_start_token is not None and span.location_end_token is not None:
                 slot_tokens = list(range(span.location_start_token, span.location_end_token))
@@ -224,7 +250,7 @@ def contrastive_slot_scores(
                 if pos <= 0:
                     continue
                 token_id = int(cand_ids[0, pos])
-                lp = float(log_probs[0, pos - 1, token_id])
+                lp = float(log_probs[i, pos - 1, token_id])
                 slot_logps.append(lp)
                 
             slot_lp = sum(slot_logps) / len(slot_logps) if slot_logps else mean_lp

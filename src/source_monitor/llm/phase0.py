@@ -30,7 +30,7 @@ from source_monitor.llm.cache import load_model, ModelMeta
 from source_monitor.llm.task_render import render_trace
 from source_monitor.llm.corruption import inject_all_types, CorruptionRecord
 from source_monitor.llm.provenance import tokenize_with_provenance
-from source_monitor.llm.telemetry import retrospective_surprisal, SpanScore
+from source_monitor.llm.telemetry import retrospective_surprisal, SpanScore, contrastive_slot_scores
 
 
 @dataclass
@@ -56,6 +56,7 @@ class ExperimentResultRecord:
     task_label: str  # "primary" or "hard"
     seed: int
     n_traces: int
+    scoring: str
     mean: AggregationResult
     max: AggregationResult
     slot_only: AggregationResult
@@ -72,6 +73,7 @@ def run_model_experiment(
     n_traces: int,
     corruption_types: tuple[str, ...],
     device: str,
+    scoring: str = "raw",
 ) -> ExperimentResultRecord:
     """Run Phase 0 analysis for a single model, task complexity, and seed."""
     start_time = time.time()
@@ -111,8 +113,11 @@ def run_model_experiment(
         corruptions = inject_all_types(clean_trace, trace_rng)
         
         # Tokenize and score clean trace
-        clean_ids, clean_spans = tokenize_with_provenance(tokenizer, clean_trace, device)
-        clean_span_scores = retrospective_surprisal(model, clean_ids, clean_spans)
+        if scoring == "contrastive":
+            clean_span_scores = contrastive_slot_scores(model, tokenizer, clean_trace, device)
+        else:
+            clean_ids, clean_spans = tokenize_with_provenance(tokenizer, clean_trace, device)
+            clean_span_scores = retrospective_surprisal(model, clean_ids, clean_spans)
         
         # Map step_index -> SpanScore for clean trace (needed for twin pairing)
         clean_step_map = {s.step_index: s for s in clean_span_scores}
@@ -131,8 +136,11 @@ def run_model_experiment(
                 continue
                 
             # Tokenize and score corrupted trace
-            corr_ids, corr_spans = tokenize_with_provenance(tokenizer, record.trace, device)
-            corr_span_scores = retrospective_surprisal(model, corr_ids, corr_spans)
+            if scoring == "contrastive":
+                corr_span_scores = contrastive_slot_scores(model, tokenizer, record.trace, device)
+            else:
+                corr_ids, corr_spans = tokenize_with_provenance(tokenizer, record.trace, device)
+                corr_span_scores = retrospective_surprisal(model, corr_ids, corr_spans)
             
             corr_step = record.step_index
             
@@ -219,6 +227,7 @@ def run_model_experiment(
         task_label=task_cfg.label,
         seed=seed,
         n_traces=n_traces,
+        scoring=scoring,
         mean=agg_results["mean"],
         max=agg_results["max"],
         slot_only=agg_results["slot_only"],
@@ -227,7 +236,7 @@ def run_model_experiment(
     )
 
 
-def run_all_experiments() -> list[ExperimentResultRecord]:
+def run_all_experiments(scoring: str = "raw") -> list[ExperimentResultRecord]:
     """Execute the full Phase 0 suite over configured models and tasks."""
     config = Phase0Config()
     
@@ -265,10 +274,11 @@ def run_all_experiments() -> list[ExperimentResultRecord]:
                     n_traces=config.n_traces,
                     corruption_types=config.corruption_types,
                     device=config.device,
+                    scoring=scoring,
                 )
                 
                 # Print summary
-                print(f"  Completed in {record.wall_seconds:.1f}s.")
+                print(f"  [{scoring}] Completed in {record.wall_seconds:.1f}s.")
                 for agg in ("mean", "max", "slot_only"):
                     res = getattr(record, agg)
                     print(f"    [{agg}] genuine_clean_avg = {res.mean_genuine_clean:.3f}")
@@ -276,10 +286,14 @@ def run_all_experiments() -> list[ExperimentResultRecord]:
                         p_auroc = res.pooled_auroc.get(corr, float("nan"))
                         m_auroc = res.matched_surface_auroc.get(corr, float("nan"))
                         p_delta = res.mean_paired_delta.get(corr, float("nan"))
+                        b_avg = res.mean_genuine_before.get(corr, float("nan"))
+                        cas_avg = res.mean_genuine_cascade.get(corr, float("nan"))
+                        c_avg = res.mean_corrupt.get(corr, float("nan"))
                         print(
                             f"      {corr:<12}: pooled_auroc={p_auroc:.3f} | "
                             f"matched_surface_auroc={m_auroc:.3f} | "
-                            f"paired_delta={p_delta:+.3f}"
+                            f"paired_delta={p_delta:+.3f}\n"
+                            f"                    before={b_avg:.3f} | cascade={cas_avg:.3f} | corrupt={c_avg:.3f}"
                         )
                 
                 # Save to JSONL
@@ -299,4 +313,20 @@ def run_all_experiments() -> list[ExperimentResultRecord]:
 
 
 if __name__ == "__main__":
-    run_all_experiments()
+    import argparse
+    parser = argparse.ArgumentParser(description="Phase 0/0b LLM Experiment Runner")
+    parser.add_argument(
+        "--scoring",
+        type=str,
+        choices=["raw", "contrastive", "both"],
+        default="raw",
+        help="Scoring method to run: raw surprisal, contrastive slot scoring, or both.",
+    )
+    args = parser.parse_args()
+    
+    if args.scoring == "both":
+        print("Running both raw and contrastive scoring modes...")
+        run_all_experiments("raw")
+        run_all_experiments("contrastive")
+    else:
+        run_all_experiments(args.scoring)

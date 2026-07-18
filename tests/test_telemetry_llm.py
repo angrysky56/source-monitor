@@ -91,3 +91,64 @@ def test_retrospective_surprisal_calculation():
     assert s1.max_neglogp > 10.0
     # slot_only_neglogp checks tokens [3, 4) which is token 9. So it should be high.
     assert s1.slot_only_neglogp > 10.0
+
+
+def test_contrastive_slot_scores():
+    from source_monitor.llm.task_render import Turn, Trace
+    from source_monitor.llm.telemetry import contrastive_slot_scores
+    
+    class MockTokenizer:
+        def apply_chat_template(
+            self, chat_turns, tokenize=False, add_generation_prompt=False
+        ) -> str:
+            res = ""
+            for turn in chat_turns:
+                res += f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n"
+            return res
+
+        def __call__(
+            self, text: str, return_offsets_mapping=False, return_tensors=None
+        ) -> dict:
+            n = len(text)
+            input_ids = torch.zeros((1, n), dtype=torch.long)
+            offsets = torch.tensor([[i, i + 1] for i in range(n)]).unsqueeze(0)
+            return {
+                "input_ids": input_ids,
+                "offset_mapping": offsets,
+            }
+
+    class MockModelOutput:
+        def __init__(self, logits: torch.Tensor):
+            self.logits = logits
+
+    class MockModel:
+        def __call__(self, input_ids: torch.Tensor, *args, **kwargs) -> MockModelOutput:
+            L = input_ids.shape[1]
+            logits = torch.zeros((input_ids.shape[0], L, 50000), dtype=torch.float32)
+            return MockModelOutput(logits)
+
+    tokenizer = MockTokenizer()
+    model = MockModel()
+    
+    turns = [
+        Turn(role="system", content="Sys instruction", is_self=False, step_index=None),
+        Turn(role="user", content="Command", is_self=False, step_index=0),
+        Turn(role="assistant", content="The red ball is in box A.", is_self=True, step_index=0, claim_surface="container", location_text="box A"),
+    ]
+    trace = Trace(
+        turns=turns,
+        query_object="red ball",
+        ground_truth_final="box A",
+        op_kinds=[0],
+        task=None,  # type: ignore
+    )
+    
+    scores = contrastive_slot_scores(model, tokenizer, trace, device="cpu")
+    
+    assert len(scores) == 1
+    s0 = scores[0]
+    assert s0.step_index == 0
+    assert s0.claim_surface == "container"
+    # Contrastive surprisal should be a valid float >= 0
+    assert s0.mean_neglogp >= 0.0
+    assert s0.slot_only_neglogp >= 0.0
