@@ -1,5 +1,44 @@
 # source-monitor — findings log
 
+## F16 — Phase 0 (LLM port, Qwen3-0.6B/1.7B): container-claim detection
+## ports decisively; phantom fails the amended bar for an identifiable
+## reason (2026-07-17; full tables in walkthrough.md)
+
+**F16a — R3 ports where surface forms match.** Retrospective surprisal on
+self-emitted claims, zero-shot, no training: ghost and mislocation
+matched-surface AUROC .987-1.000 (1.7B; .969-.998 at 0.6B), paired deltas
+huge (misloc slot-only +29 nats). Detection scales UP with model size and
+task length. The A2 guard did its job in both directions: containers pass
+the artifact test cleanly.
+
+**F16b — The phantom failure and the ghost-pooled anomaly are ONE
+finding: absence-assertion prior bias.** Phantom matched-surface AUROC
+.778-.838 (< .85 bar, every config); ghost POOLED slot AUROC .835 despite
+matched .990. Common cause: the model assigns depressed logp to
+"nowhere"-type claims regardless of truth — true absences look surprising
+(polluting the genuine pool), false absences can't separate from true
+ones. Reporting bias: pretraining text under-asserts absences. The toy
+was immune because its priors were task-learned. Phantom's high paired
+delta (+8.6) with mediocre matched AUROC is the confirming signature
+(both populations shifted, overlap preserved). Per the amended gate:
+Phase 0 = container-claims PASS, phantom = INVESTIGATE branch.
+
+**F16c — Aggregation:** max-token surprisal is uninformative in natural
+text (AUROC .3-.6); mean and slot-only work. Slot-only is the ceiling for
+containers, NOT for phantom (prior bias lives in the slot itself).
+
+**Phase 0b (specified in implementation_plan.md): contrastive slot
+scoring.** Replace raw -logp with a candidate-renormalized score: at each
+claim slot, score all candidate completions (each container + nowhere)
+and use -log[p(emitted)/Σ p(candidates)] — a likelihood-ratio detector
+that cancels class priors entirely and isolates the state-contradiction
+component. Predictions: phantom matched ≥ .9; ghost pooled ≈ ghost
+matched (anomaly dissolves — the internal consistency check); containers
+unchanged. If phantom STILL fails with priors cancelled, the model
+genuinely cannot track absence at these scales — a real limit, worth
+knowing before Phase 1. Also owed from Phase 0: the A3 three-population
+split (the cascade population went unreported).
+
 ## F15 — Power run, n=9 paired seeds (2026-07-17): the gate's increment is
 ## real on phantom, suggestive on misloc, null on ghost
 

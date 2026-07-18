@@ -10,18 +10,38 @@ Port source-monitor's zero-shot detection signal (R3: AUROC .93–1.00 on all co
 
 > [!IMPORTANT]
 > **Model choice: Qwen3-1.7B vs 0.6B.** The integration doc calls for 1.7B. On the 3060 (12GB), bf16 inference at 1.7B is ~3.4GB — comfortable. However, the seer repo already has a pinned 0.6B snapshot (`Qwen/Qwen3-0.6B` at `c1899de2`). I'll implement the harness to accept any Qwen3 checkpoint via config, and the Phase 0 experiment will target 1.7B as the doc specifies. **Does this seem right, or would you prefer to start with 0.6B for faster iteration and step up?**
+>
+> **→ RESOLVED (Fable review): both, sequentially.** Debug the harness on 0.6B
+> (cached, fast), then run BOTH 0.6B and 1.7B as the reported experiment —
+> inference is <1 min each, and the size comparison is free signal about how
+> detection scales. Use the post-trained (chat) checkpoints, not `-Base`: the
+> task is chat-format and the emissions are assistant turns.
 
 > [!IMPORTANT]
 > **Location.** The integration doc says "New LLM-scale work lives HERE (a future `llm/` subpackage), self-contained as always." I'll create `src/source_monitor/llm/` in the source-monitor repo. The seer repo stays untouched as the design archive. **Confirm this is the right home.**
+>
+> **→ RESOLVED: confirmed.** `src/source_monitor/llm/`, reusing `metrics.py`
+> only. seer stays archival per SEER-INTEGRATION.md §0.
 
 > [!WARNING]
 > **New dependency: `transformers>=4.51`.** Loading Qwen3 requires the `transformers` library (and `huggingface_hub` for cache resolution). I'll add these to `pyproject.toml` under a new `[project.optional-dependencies] llm` extra so the toy-scale code stays zero-dependency beyond torch+numpy.
+>
+> **→ RESOLVED: approved as an `llm` extra.** `accelerate` is not strictly
+> needed for single-GPU `.to("cuda")` bf16 but is harmless; keep. Note for
+> later phases: Gemma 4 E-series will likely need a newer transformers floor
+> than Qwen3 does — pin per-phase, not globally.
 
 ## Open Questions
 
 1. **Task complexity.** The toy uses 8 ops × 4 objects × 3 containers. For the LLM rendered to natural text, do you want the same parameters or something larger to stress the model's tracking?
+   **→ RESOLVED: keep 8×4×3 as primary (comparability with the toy anchors),
+   and add one harder config (12×6×4) as a secondary row — if detection is
+   at ceiling on the easy config, the hard config shows where it bends.**
 2. **Number of traces.** The toy ran 400 eval traces per arm. I'll default to 200 traces (× 3 corruption types = 600 corrupted + 200 clean = 800 forward passes). With bf16 on the 3060, each pass over a ~200-token context takes < 50ms, so the full experiment is < 1 minute of GPU time. Bump up or down?
+   **→ RESOLVED: 400.** Inference is nearly free here; the stratified
+   analyses in Amendment A2 want the headroom.
 3. **Multi-seed?** Phase 0 has no training, so the only stochasticity is task generation. I'll run 3 seeds for the task RNG and report mean ± std.
+   **→ RESOLVED: yes, 3 task-RNG seeds as planned.**
 
 ---
 
@@ -306,7 +326,12 @@ uv run python -m source_monitor.llm.phase0
 Expected output: per-corruption-type AUROC + pooled AUROC, printed and saved to `results/llm_phase0_results.jsonl`.
 
 ### Success/Failure Decision
-- **AUROC ≥ .9 per type**: Phase 0 PASSES → proceed to Phase 1 (out-of-domain transfer)
+- **AUROC ≥ .9 per type AND matched-surface AUROC ≥ .85 (Amendment A2)**:
+  Phase 0 PASSES → proceed to Phase 1 (out-of-domain transfer)
+- **Pooled ≥ .9 but matched-surface < .85**: the detector is reading surface
+  form, not state contradiction — a Phase-0-scale reproduction of the R2
+  signature-learning failure. Investigate before proceeding; do NOT report
+  the pooled number as a pass.
 - **AUROC < .9 but > .7**: Investigate — calibration issue? Span aggregation choice? Task too simple?
 - **AUROC ≈ .5**: The signal does not port. Stop. Understand why before any training.
 
@@ -324,3 +349,174 @@ Expected output: per-corruption-type AUROC + pooled AUROC, printed and saved to 
 8. `phase0.py` (orchestrator — depends on all above)
 9. `__init__.py` (last — exports)
 10. Run tests, then run experiment
+
+
+---
+
+# Fable Review — Amendments (2026-07-17)
+
+The plan's architecture, test strategy, and decision gates are right and are
+approved as written. The amendments below add guards against three
+measurement confounds that the toy project's history says to treat as
+first-class (every headline there flipped at least once on exactly this
+kind of issue), plus two implementation pitfalls specific to chat-templated
+LLMs. Opus should fold these in during the numbered execution order —
+none change the file structure.
+
+## A1 — Chat-template hygiene (telemetry.py, provenance.py)
+
+Two silent-bug sources specific to Qwen3:
+
+1. **Thinking mode.** Qwen3's chat template inserts `<think>` scaffolding;
+   `apply_chat_template(..., enable_thinking=False)` must be pinned for
+   every render, and any template-inserted tokens (role markers, think
+   tags, BOS/EOS) must be EXCLUDED from the scored span. Score only the
+   CONTENT tokens of the assistant turn. Template boilerplate has
+   near-deterministic logp and dilutes mean-aggregated surprisal toward
+   the ceiling — the toy's equivalent would have been averaging the
+   emission's γ with five EMIT markers.
+2. **Prefix stability.** The plan's span attribution should be built by
+   incremental rendering (template over `turns[:i]`, diff token lengths).
+   Add an explicit test: `rendered(turns[:i])` is a string prefix of
+   `rendered(turns[:i+1])` for all i (with `add_generation_prompt=False`).
+   If the template violates prefix stability anywhere, span indices are
+   silently garbage — this is the single most common bug in
+   span-attribution code, and the round-trip test as specified would not
+   catch a systematic off-by-template-token shift.
+
+## A2 — The surface-form confound (phase0.py analysis; REQUIRED for pass)
+
+In the toy, corrupt and genuine emissions were format-identical single
+tokens. In text, "…is in box C" (ghost/misloc) and "…is nowhere" (phantom)
+differ in surface statistics from each other. A detector could hit high
+pooled AUROC by learning "'nowhere' is a rare continuation," which is a
+surface artifact, not state-contradiction reading — the zero-shot analog
+of R2's signature-learning failure.
+
+Guard: **matched-surface stratification.** Compare corrupted spans only
+against genuine spans of the same claim surface type (container-claims vs
+container-claims; nowhere-claims vs nowhere-claims — the clean traces
+contain both types naturally, since ~half the emissions are NOWHERE).
+Report per-type AUROC both pooled and matched-surface. The pass bar in
+the Success/Failure section now requires matched-surface ≥ .85. This is
+cheap (a groupby in the analysis) and is the difference between claiming
+"the model detects its own false statements" and "the model finds
+'nowhere' surprising."
+
+## A3 — Paired scoring and the cascade population (phase0.py)
+
+The plan already generates clean + 3 corrupted variants per trace; use the
+pairing:
+
+1. **Primary statistic alongside AUROC:** the paired delta
+   `score(span k, corrupted variant) − score(span k, clean variant)` —
+   same trace, same position, same surface form up to the planted change.
+   This cancels position and content effects that pooled AUROC smears over
+   (early spans have less context and higher baseline surprisal).
+2. **Three genuine populations, reported separately:** genuine spans in
+   clean traces; genuine spans BEFORE the corruption in corrupted traces
+   (should match clean); and genuine spans AFTER the corruption
+   (contaminated context — the F13b cascade population: TRUE statements
+   that contradict the earlier lie may legitimately score as surprising).
+   Pooling the cascade population into "genuine" would understate the
+   detector; splitting it out turns a nuisance into a diagnostic — an
+   elevated post-corruption population is itself evidence the model is
+   tracking state rather than surface.
+
+## A4 — Aggregation as a reported ablation, not a config choice
+
+Aggregation is where the signal lives or dies: most tokens of "The red
+ball is in box A" are boilerplate; the information is in the location
+tokens. Report three aggregations side by side rather than defaulting to
+one: (a) mean −logp over content tokens, (b) max token −logp (= min logp)
+over content tokens, (c) location-slot only — the renderer knows exactly
+which tokens carry the claim; scoring only those is the toy-faithful
+version and the expected ceiling. If (c) ≫ (a), that quantifies how much
+Phase 1's free-text setting (where slots are unknown) will need from
+smarter span segmentation. This reframes `config.aggregation` from a
+choice into three columns of the results table.
+
+## A5 — Minor
+
+- `n_ops` at 8 keeps ~200-token contexts; the harder 12×6×4 config (Open
+  Question 1 resolution) roughly doubles that. Both are trivial for the
+  3060.
+- Log `transformers`, model revision hashes, and template flags into the
+  JSONL records (basin-variance discipline: every number traceable to an
+  exact environment).
+- `emission_time_surprisal` stays implemented-but-unused in Phase 0, as
+  planned; its generation path must also pin `enable_thinking=False` when
+  it is eventually exercised.
+- Fan protocol applies from the first model load.
+
+## Verdict
+
+Proceed in the plan's execution order with A1–A4 folded in. The plan's
+instinct to fail closed (stop at AUROC ≈ .5 and understand) is exactly
+right; A2 extends the same instinct to the more dangerous failure mode —
+passing for the wrong reason.
+
+
+---
+
+# Phase 0b — Contrastive Slot Scoring (Fable, post-Phase-0 review)
+
+**Trigger.** Phase 0's decision gate landed in the INVESTIGATE branch on
+phantom: matched-surface AUROC .778-.838 (< .85) in every configuration,
+while both container types passed at .97-1.00. The ghost POOLED anomaly
+(.835 pooled vs .990 matched, slot aggregation) shares the cause:
+**absence-assertion prior bias** — the model assigns depressed logp to
+"nowhere"-claims regardless of truth, so true absences look surprising and
+false ones cannot separate from them. Raw surprisal conflates
+"improbable claim-form" with "contradicts state." See FINDINGS F16.
+
+## The fix
+
+Replace raw span surprisal with a **candidate-renormalized (likelihood-
+ratio) score** at each claim slot. For emission slot s with candidate set
+C(s) = {each container named in the trace} ∪ {"nowhere"}:
+
+1. Render the assistant turn once per candidate c ∈ C(s) (same prefix,
+   only the location phrase substituted).
+2. Teacher-forced score of the slot tokens for each candidate:
+   lp(c) = sum logp(slot tokens of c | prefix).  (Length-normalize:
+   mean logp per slot token, so "box A" vs "nowhere" token counts don't
+   bias the comparison.)
+3. Signal for the emitted claim e:
+   score(s) = −[ lp(e) − logsumexp_{c∈C(s)} lp(c) ]
+   i.e. −log of the renormalized probability of the emitted claim within
+   the candidate set. Class priors common to a surface form cancel; what
+   remains is the model's contextual preference ORDERING — the
+   re-derive-and-compare (cavity) check restricted to the answer space.
+
+## Implementation notes (one function + one analysis pass)
+
+- `telemetry.py`: add `contrastive_slot_score(model, trace_tokens,
+  slot_annotations, candidates)` — batches the |C| variants of each turn;
+  prefix is shared so per-slot cost is |C| short suffix scorings. At 400
+  traces × ≤12 slots × ≤5 candidates this is minutes on the 3060.
+- `phase0.py`: add `--scoring contrastive` alongside `raw`; emit the same
+  pooled / matched / paired tables, PLUS the A3 three-population split
+  (clean-trace genuine, pre-corruption genuine, post-corruption genuine)
+  which Phase 0 left unreported — the post-corruption population is the
+  cascade diagnostic (F13b) and should be examined, not pooled away.
+- Keep Phase 0's raw-scoring results as the comparison column; the delta
+  between raw and contrastive per type IS the measured size of the prior
+  bias — report it.
+
+## Pre-registered predictions and gate
+
+- P-0b.1: phantom matched-surface AUROC ≥ .90 under contrastive scoring
+  (1.7B, both task configs).
+- P-0b.2: ghost pooled ≈ ghost matched (the anomaly dissolves) — the
+  internal-consistency check that the mechanism story is right.
+- P-0b.3: container types unchanged (≥ .97 matched).
+- PASS: all three → Phase 0 closes as PASS-with-mechanism-note; proceed
+  to Phase 1 carrying BOTH scorers (raw for free-text where candidates
+  can't be enumerated; contrastive wherever a claim's alternative set is
+  constructible — and note that Phase 1 should expect raw surprisal to
+  underperform on negative/absence assertions generally, which is now a
+  predicted OOD failure mode, not a surprise).
+- FAIL on P-0b.1 with priors cancelled: the model genuinely cannot track
+  absence at these scales — a real capability limit; characterize (does
+  it scale 0.6B→1.7B→4B?) before any Phase 2 training.
