@@ -217,41 +217,48 @@ def contrastive_slot_scores(
         # Batched forward pass: (9, max_L, V)
         outputs = model(batch_ids, attention_mask=batch_mask)
         
-        # Calculate log probabilities of vocabulary: (9, max_L, V)
-        log_probs = F.log_softmax(outputs.logits.float(), dim=-1)
-        
         lp_candidates = {}
         
         for i, c in enumerate(candidates):
             span = cand_spans_list[i][-1]
             cand_ids = cand_ids_list[i]
             
-            # Content tokens
+            # Content tokens range: [start_token, end_token)
             content_tokens = list(range(span.start_token, span.end_token))
             neg_logps_content = []
-            for pos in content_tokens:
-                if pos <= 0:
-                    continue
-                token_id = int(cand_ids[0, pos])
-                # Access i-th batch element in log_probs
-                lp = float(log_probs[i, pos - 1, token_id])
-                neg_logps_content.append(lp)
+            
+            if content_tokens:
+                # Slice logits for content tokens: shape (len(content_tokens), V)
+                content_logits = outputs.logits[i, [pos - 1 for pos in content_tokens], :].float()
+                content_log_probs = F.log_softmax(content_logits, dim=-1)
+                
+                for idx, pos in enumerate(content_tokens):
+                    if pos <= 0:
+                        continue
+                    token_id = int(cand_ids[0, pos])
+                    lp = float(content_log_probs[idx, token_id])
+                    neg_logps_content.append(lp)
                 
             mean_lp = sum(neg_logps_content) / len(neg_logps_content) if neg_logps_content else 0.0
             max_neg_lp = min(neg_logps_content) if neg_logps_content else 0.0
             
-            # Slot tokens
+            # Slot tokens range: [location_start_token, location_end_token)
             slot_tokens = []
             if span.location_start_token is not None and span.location_end_token is not None:
                 slot_tokens = list(range(span.location_start_token, span.location_end_token))
                 
             slot_logps = []
-            for pos in slot_tokens:
-                if pos <= 0:
-                    continue
-                token_id = int(cand_ids[0, pos])
-                lp = float(log_probs[i, pos - 1, token_id])
-                slot_logps.append(lp)
+            if slot_tokens:
+                # Slice logits for slot tokens: shape (len(slot_tokens), V)
+                slot_logits = outputs.logits[i, [pos - 1 for pos in slot_tokens], :].float()
+                slot_log_probs = F.log_softmax(slot_logits, dim=-1)
+                
+                for idx, pos in enumerate(slot_tokens):
+                    if pos <= 0:
+                        continue
+                    token_id = int(cand_ids[0, pos])
+                    lp = float(slot_log_probs[idx, token_id])
+                    slot_logps.append(lp)
                 
             slot_lp = sum(slot_logps) / len(slot_logps) if slot_logps else mean_lp
             
