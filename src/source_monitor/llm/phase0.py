@@ -236,9 +236,19 @@ def run_model_experiment(
     )
 
 
-def run_all_experiments(scoring: str = "raw") -> list[ExperimentResultRecord]:
-    """Execute the full Phase 0 suite over configured models and tasks."""
+def run_all_experiments(
+    scoring: str = "raw",
+    model_names: tuple[str, ...] | None = None,
+    n_traces: int | None = None,
+) -> list[ExperimentResultRecord]:
+    """Execute the full Phase 0 suite over configured models and tasks.
+
+    model_names / n_traces override the Phase0Config defaults (used for the
+    Qwen3-4B scaling sweep at reduced n).
+    """
     config = Phase0Config()
+    model_names = model_names or config.model_names
+    n_traces = n_traces or config.n_traces
     
     # Create results folder
     os.makedirs(config.results_dir, exist_ok=True)
@@ -246,7 +256,7 @@ def run_all_experiments(scoring: str = "raw") -> list[ExperimentResultRecord]:
     
     all_records: list[ExperimentResultRecord] = []
     
-    for model_name in config.model_names:
+    for model_name in model_names:
         print(f"\n======================================================================")
         print(f"Loading {model_name} on {config.device} ({config.dtype})...")
         print(f"======================================================================")
@@ -264,14 +274,14 @@ def run_all_experiments(scoring: str = "raw") -> list[ExperimentResultRecord]:
             
         for task_cfg in config.task_configs:
             for seed in config.seeds:
-                print(f"Running {task_cfg.label} task | seed {seed} | traces {config.n_traces}...")
+                print(f"Running {task_cfg.label} task | seed {seed} | traces {n_traces}...")
                 record = run_model_experiment(
                     model=model,
                     tokenizer=tokenizer,
                     meta=meta,
                     task_cfg=task_cfg,
                     seed=seed,
-                    n_traces=config.n_traces,
+                    n_traces=n_traces,
                     corruption_types=config.corruption_types,
                     device=config.device,
                     scoring=scoring,
@@ -322,11 +332,24 @@ if __name__ == "__main__":
         default="raw",
         help="Scoring method to run: raw surprisal, contrastive slot scoring, or both.",
     )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help="Override model list, e.g. --models Qwen/Qwen3-4B",
+    )
+    parser.add_argument(
+        "--n-traces",
+        type=int,
+        default=None,
+        help="Override n_traces (e.g. 200 for the 4B scaling sweep)",
+    )
     args = parser.parse_args()
-    
+
+    models = tuple(args.models) if args.models else None
     if args.scoring == "both":
         print("Running both raw and contrastive scoring modes...")
-        run_all_experiments("raw")
-        run_all_experiments("contrastive")
+        run_all_experiments("raw", models, args.n_traces)
+        run_all_experiments("contrastive", models, args.n_traces)
     else:
-        run_all_experiments(args.scoring)
+        run_all_experiments(args.scoring, models, args.n_traces)
