@@ -16,8 +16,11 @@
 >
 > Gate: **P-0b.1 FAIL** (phantom < .90 both configs, both aggregations),
 > **P-0b.2 FAIL** (ghost pooled ≪ matched persists), **P-0b.3 PASS** at 1.7B.
-> Contrastive helps phantom only under *mean* aggregation (+.06–.09), trending
-> toward the bar with scale. Next: 0.6B→1.7B→4B. Reproduce:
+> Contrastive helps phantom only under *mean* aggregation (+.06–.10), and it
+> scales: at **Qwen3-4B** phantom mean-agg reaches **.935 / .951** (primary /
+> hard) — clearing .90 on BOTH configs, so **P-0b.1 passes at 4B** though it
+> failed at 1.7B. Phase 0 closes PASS-with-scale-note (absence needs ~4B +
+> sentence-level contrastive). See FINDINGS.md F18. Reproduce:
 > `scripts/aggregate_phase0.py`.
 
 We have successfully implemented and executed **Phase 0** of the SEER LLM integration plan in the `source-monitor` repository. 

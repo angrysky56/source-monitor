@@ -1,5 +1,30 @@
 # source-monitor — findings log
 
+## F18 — Qwen3-4B closes the scaling question: absence-tracking is
+## SCALE-limited, not fundamental (2026-07-19; n=200 x 3 seeds).
+
+Phantom matched-surface AUROC, contrastive, by scale:
+
+    aggregation   0.6B P/H     1.7B P/H     4B P/H
+    slot_only     .71/.78      .79/.85      .84/.89     (still < .90)
+    mean          .77/.84      .87/.91      .935/.951   (>= .90 BOTH at 4B)
+
+Monotonic in model size and task length on both aggregations. Under the
+sentence-level (mean) contrastive metric phantom clears the .90 bar at 1.7B/hard
+and at 4B on BOTH configs -> P-0b.1 PASSES at 4B (it FAILED at 1.7B). Under
+slot_only it is still climbing (.84/.89 at 4B). Containers stay >= .99 matched at
+4B; the ghost pooled << matched anomaly (P-0b.2) persists (a pooled-metric
+absence-prior artifact, not a detection failure). Raw phantom also rises with
+scale (.83/.89 at 4B), so larger models track absence better even before
+renormalization; contrastive+mean adds +.07-.10 on top.
+
+Conclusion: **Phase 0 closes PASS-with-scale-note.** Retrospective
+self-consistency detection ports to pretrained LLMs: container claims from 1.7B,
+absence claims from ~4B, with absence requiring (a) candidate renormalization and
+(b) sentence-level (not slot-only) aggregation. Carry into Phase 1: raw surprisal
+underperforms on negative/absence assertions (a predicted OOD weak axis); prefer
+contrastive+mean wherever a claim's alternative set is constructible.
+
 ## F17 — Phase 0b RESULTS, corrected & confound-controlled (2026-07-19;
 ## 400 traces x 3 seeds, raw & contrastive, persisted; supersedes the interim
 ## Phase 0b claims). Reproduce via scripts/aggregate_phase0.py.

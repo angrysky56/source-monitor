@@ -52,7 +52,7 @@ def fmt(s):
     return f"{s[0]:.3f}±{s[1]:.3f}(n{s[2]})" if s else "  --  "
 
 
-MODELS = [("0.6B", "0.6B"), ("1.7B", "1.7B")]
+MODELS = [("0.6B", "0.6B"), ("1.7B", "1.7B"), ("4B", "4B")]
 TASKS = ["primary", "hard"]
 
 # --- full table (slot_only, the pre-registered aggregation) -----------------
