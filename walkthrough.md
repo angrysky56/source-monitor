@@ -1,5 +1,25 @@
 # Walkthrough — Phase 0: Retrospective Surprisal LLM Port
 
+> **CORRECTION (2026-07-19) — see FINDINGS.md F17 first.** The Phase 0 tables
+> below carry a corruption confound (false containers drawn from the global
+> 8-box pool, not each trace's actual boxes), which inflates ghost/mislocation;
+> and the interim Phase 0b numbers were single-seed and unpersisted. The
+> corrected, multi-seed, confound-controlled results (400 traces × 3 seeds,
+> raw & contrastive) — matched-surface AUROC:
+>
+> | 1.7B, matched-surface | raw | contrastive |
+> |---|---|---|
+> | ghost (slot) | .96 | **.99** |
+> | mislocation (slot) | 1.00 | 1.00 |
+> | phantom (slot, primary/hard) | .78 / .84 | .79 / .85 |
+> | phantom (mean, primary/hard) | .78 / .84 | **.87 / .91** |
+>
+> Gate: **P-0b.1 FAIL** (phantom < .90 both configs, both aggregations),
+> **P-0b.2 FAIL** (ghost pooled ≪ matched persists), **P-0b.3 PASS** at 1.7B.
+> Contrastive helps phantom only under *mean* aggregation (+.06–.09), trending
+> toward the bar with scale. Next: 0.6B→1.7B→4B. Reproduce:
+> `scripts/aggregate_phase0.py`.
+
 We have successfully implemented and executed **Phase 0** of the SEER LLM integration plan in the `source-monitor` repository. 
 
 Our goal was to test whether the **retrospective surprisal** (zero-shot detection signal, R3) ports to pretrained LLMs (specifically Qwen3-0.6B and 1.7B Chat models) and survives the **surface-form confound** (A2) and **chat template hygiene** (A1) limitations.

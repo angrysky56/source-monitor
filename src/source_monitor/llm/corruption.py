@@ -88,6 +88,17 @@ def _corrupt_trace_turn(
     )
 
 
+def _trace_containers(task) -> list[int]:
+    """Container tokens actually named in this trace's task.
+
+    Corruptions must draw the false container from this in-universe set. Drawing
+    from the full global pool injects boxes that never appear in-context, adding
+    a surface-novelty confound (an unseen box is surprising regardless of state)
+    on top of the state-contradiction signal the detector is meant to measure.
+    """
+    return sorted({t for t in task.tokens if CON0 <= t < CON0 + N_CONTAINERS})
+
+
 def inject_ghost_text(trace: Trace, rng: random.Random) -> CorruptionRecord | None:
     """Trained-on corruption type (the sps-blindspot ghost):
 
@@ -102,7 +113,8 @@ def inject_ghost_text(trace: Trace, rng: random.Random) -> CorruptionRecord | No
     if not ghost_steps:
         return None
     k = rng.choice(ghost_steps)
-    new_loc_tok = CON0 + rng.randrange(N_CONTAINERS)
+    used = _trace_containers(task)
+    new_loc_tok = rng.choice(used)
     return _corrupt_trace_turn(trace, k, new_loc_tok, "ghost")
 
 
@@ -122,7 +134,9 @@ def inject_mislocation_text(trace: Trace, rng: random.Random) -> CorruptionRecor
         return None
     k = rng.choice(steps)
     cur = task.loc_targets[k]
-    options = [CON0 + c for c in range(N_CONTAINERS) if CON0 + c != cur]
+    options = [c for c in _trace_containers(task) if c != cur]
+    if not options:
+        return None
     new_loc_tok = rng.choice(options)
     return _corrupt_trace_turn(trace, k, new_loc_tok, "mislocation")
 

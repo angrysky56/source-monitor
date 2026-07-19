@@ -94,3 +94,27 @@ def test_corruption_does_not_mutate_original():
     for orig, turn in zip(original_contents, trace.turns):
         assert turn.content == orig
         assert turn.is_corrupted is False
+
+
+def test_corruption_containers_are_in_universe():
+    """Ghost/mislocation must inject a container that is named in the trace.
+
+    Regression for the surface-novelty confound: drawing the false container
+    from the global 8-box pool named boxes never seen in-context, so the
+    corruption was surprising partly for being novel rather than for
+    contradicting state -- a hole in the A2 matched-surface guard.
+    """
+    from source_monitor.llm.corruption import _trace_containers
+
+    for seed in range(60):
+        trace = _make_trace(seed=seed, n_ops=8, remove_prob=0.4)
+        used = set(_trace_containers(trace.task))
+        for inj in (inject_ghost_text, inject_mislocation_text):
+            rec = inj(trace, random.Random(seed + 1))
+            if rec is None:
+                continue
+            injected_tok = rec.trace.task.loc_targets[rec.step_index]
+            assert injected_tok in used, (
+                f"{inj.__name__} injected an out-of-universe container "
+                f"(seed {seed}): {injected_tok} not in {sorted(used)}"
+            )

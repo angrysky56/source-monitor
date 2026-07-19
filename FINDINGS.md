@@ -1,8 +1,56 @@
 # source-monitor — findings log
 
+## F17 — Phase 0b RESULTS, corrected & confound-controlled (2026-07-19;
+## 400 traces x 3 seeds, raw & contrastive, persisted; supersedes the interim
+## Phase 0b claims). Reproduce via scripts/aggregate_phase0.py.
+
+**F17a — Two methodology fixes before the numbers are trustworthy.**
+(1) *Corruption drew the false container from the global 8-box pool*, not the
+3-4 boxes actually named in each trace, so ~50-70% of ghost/misloc corruptions
+pointed at a never-seen box — a surface-novelty confound the A2 matched-surface
+guard did NOT catch (it matched claim TYPE, not box-seen-ness). Fixed:
+corruptions now draw in-universe. Large effect on containers (0.6B misloc slot
+paired-delta +28.7 -> +7.1 nats; ghost matched .99 -> .90 at 0.6B); phantom is
+untouched (it never picks a box: matched .7133 -> .713). (2) *The contrastive
+candidate set was also the global 8-box pool*; restricted to trace containers +
+"nowhere" per spec, and the per-candidate Jinja re-render (the "seed-137 hang"
+— slowness/thermal, NOT a logic loop) was removed. The prior interim
+"partial pass / projected .893 intersects .90" was single-seed, unpersisted,
+and pre-confound-fix — only ONE contrastive row had ever reached disk; not
+reproducible.
+
+**F17b — Containers port at 1.7B; phantom does not clear the bar, but
+contrastive helps at the SENTENCE level.** Matched-surface AUROC:
+- containers (1.7B, contrastive): ghost .99, misloc 1.00; contrastive lifts
+  ghost matched +.02-.03 over raw. Honest at 0.6B: ghost ~.90-.93 (below the
+  old .97 bar only because the novelty inflation is gone).
+- phantom is aggregation-dependent:
+    slot_only : raw ~ contrastive, ~0 lift   (1.7B: .79 / .85)
+    mean      : contrastive +.06-.09, monotonic in scale
+                .774 / .837 / .869 / .912   (0.6B-P / 0.6B-H / 1.7B-P / 1.7B-H)
+  1.7B/hard mean-agg crosses .90; 1.7B/primary (.869) does not. max: negative
+  (uninformative, per F16c). Container matched stays .999-1.00 under mean-agg,
+  so the phantom mean-lift is real signal, not global inflation.
+
+**F17c — Gate verdict.** P-0b.1 FAIL (needs phantom matched >= .90 under
+contrastive at 1.7B on BOTH configs; primary is .79 slot / .87 mean).
+P-0b.2 FAIL (ghost pooled << matched persists at 1.7B, slot: .67-.72 vs .99 —
+the anomaly does NOT dissolve). P-0b.3 PASS at 1.7B (containers >= .99).
+
+**F17d — Mechanism & next step.** The absence signal lives in the claim
+SENTENCE ("is nowhere" vs "is in X"), not the single slot token: candidate
+renormalization recovers most of the phantom gap ONLY under mean aggregation.
+F16b's prior-bias story is thus partially right (cancelling priors helps) but
+insufficient at <=1.7B, and matched-surface already neutralizes the slot-level
+prior (hence slot-only contrastive ~0). Scaling is steep and monotonic, so per
+the pre-registered FAIL-P-0b.1 branch: characterize 0.6B->1.7B->4B before any
+Phase 2 training. 4B may clear .90 on both configs under mean-agg.
+
 ## F16 — Phase 0 (LLM port, Qwen3-0.6B/1.7B): container-claim detection
 ## ports decisively; phantom fails the amended bar for an identifiable
 ## reason (2026-07-17; full tables in walkthrough.md)
+## [CORRECTED by F17, 2026-07-19: the container matched AUROCs below are
+## inflated by the 8-box novelty confound; the phantom conclusion stands.]
 
 **F16a — R3 ports where surface forms match.** Retrospective surprisal on
 self-emitted claims, zero-shot, no training: ghost and mislocation
