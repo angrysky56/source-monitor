@@ -1,5 +1,45 @@
 # source-monitor — findings log
 
+## F19 — Phase 1 (OOD transfer): the signal ports for CONTEXT-DERIVABLE
+## claims (3/4 domains), fails on pure factual RECALL — and recall
+## detection INVERTS with scale (2026-07-19; n=200 x 3 seeds, 1.7B + 4B).
+
+Matched-surface AUROC, best-of-{raw,contrastive}, mean aggregation:
+
+    domain         value (1.7B/4B)   negation (1.7B/4B)   scorers
+    entity_prose   .998 / 1.000      .976 / 1.000         raw+contrastive
+    arithmetic     1.000 / 1.000     1.000 / 1.000        raw+contrastive
+    code_trace     .917 / .852       .901 / .970          raw only (free-text)
+    factual_qa     .565 / .538       .643 / .382          raw+contrastive
+
+**F19a — Transfer holds wherever the answer is derivable from the trace's own
+context.** entity_prose (format change only), arithmetic (new reasoning domain),
+and code_trace (free-text, agent-like) all detect planted self-errors at .85-1.00
+matched — decisively above the ~.50 a discriminative L1 probe gives OOD (R2/F4).
+The Phase 0 lessons replicate OOD: contrastive+mean rescues negation
+(entity_prose neg .855 -> .976 at 1.7B), and detection scales up with size.
+P-1.3 (free-text floor) passes at .85.
+
+**F19b — factual_qa FAILS at chance, and negation detection INVERTS with scale.**
+Pure world-knowledge recall sits at AUROC ~.50 at both scales. Worse, the 4B raw
+negation AUROC is .000 (perfectly inverted, +-.000 over seeds): for unanswerable
+questions the model finds the correct "no reliable record" MORE surprising than a
+confident fabricated answer — every time. Mechanism: retrospective surprisal
+measures the model's own ANSWER PRIOR, not truth. When truth is not in-context,
+surprisal reflects belief; and larger models confabulate more fluently, so
+"I don't know" looks anomalous. This is the opposite of Phase 0's absence scaling
+(which was context-derivable).
+
+**F19c — Verdict: PASS-with-scope, not FAIL.** The signal is claim-TYPE-bound
+(derivable-inconsistency vs factual-recall), NOT domain-bound — it ports across
+formats, reasoning, and free-text agent traces. This matches the architecture:
+telemetry catches derivable inconsistency; factual/recall claims must route to a
+different actor (verification / retrieval / efh-core escalation, SEER Layer 4),
+never to surprisal. Owed next: a confirmatory in-context-factual variant (state
+the fact earlier in the trace) — it should jump to high AUROC, proving the
+boundary is derivability, not the factual domain per se. Then Phase 2
+(hole-rehearsal QLoRA).
+
 ## F18 — Qwen3-4B closes the scaling question: absence-tracking is
 ## SCALE-limited, not fundamental (2026-07-19; n=200 x 3 seeds).
 
