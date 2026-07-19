@@ -40,6 +40,38 @@ the fact earlier in the trace) — it should jump to high AUROC, proving the
 boundary is derivability, not the factual domain per se. Then Phase 2
 (hole-rehearsal QLoRA).
 
+## F19d — CONFIRMATORY TEST FALSIFIED the naive "derivability" claim; the real
+## boundary is competing-PRIOR ambiguity (2026-07-19). Supersedes F19c's guess.
+
+F19c predicted an in-context-factual variant (answer stated in the trace) would
+jump to high AUROC. It did NOT: factual_grounded matched value AUROC .55-.58 at
+1.7B (3 seeds) and .58 at 4B — chance, no better than ungrounded recall. A
+copy-diagnostic (scripts/diag_factual_copy.py; 1.7B, value-token raw AUROC,
+corrupt vs genuine) explains why:
+
+    A nonsense-copy      0.792   in-context NOVEL fact ("secret code is Zebra")
+    B realfact-plain     0.578   natural grounding of a real fact
+    C realfact-meta      0.578   generator's phrasing (== B, so not a phrasing artifact)
+    D realfact-none      0.484   pure recall
+
+In-context COPYING works (nonsense .79 >> .5), ruling out a scoring bug and the
+"setup can't use context" hypothesis. But for REAL facts, grounding does not
+help: the model's strong prior over plausible answer tokens swamps the in-context
+signal — genuine "Paris" and plausible-wrong "Lyon" carry comparable prior mass
+(mean surprisal 21 vs 24) so surprisal can't separate them; a nonsense answer has
+no competing prior (14 vs 18) so it can.
+
+REVISED mechanism (supersedes F19c): retrospective surprisal detects
+self-inconsistency only when the answer is BOTH pinned by context AND not swamped
+by competing parametric priors. Entity/arithmetic/code satisfy both (uniquely
+determined, low-ambiguity slots); factual recall fails the second condition and
+grounding fixes only the first. Monotone gradient: entity ~1.0 > nonsense-copy
+.79 > real-grounded .58 > real-recall .48. Seer implication is sharper than F19c
+stated: knowledge/factual claims MUST route to verification/retrieval (Layer 4),
+because no amount of in-context grounding makes them surprisal-detectable when
+distractors are a-priori plausible. (factual_grounded run: 3 seeds 1.7B + 1 seed
+4B, stopped early — the effect was flat and consistent; diagnostic is the decider.)
+
 ## F18 — Qwen3-4B closes the scaling question: absence-tracking is
 ## SCALE-limited, not fundamental (2026-07-19; n=200 x 3 seeds).
 

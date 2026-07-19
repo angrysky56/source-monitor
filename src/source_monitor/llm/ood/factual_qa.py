@@ -59,13 +59,21 @@ def _flat_facts() -> list[tuple[str, str, str, list[str]]]:
     return [(cat, q, a, d) for cat, items in FACTS.items() for (q, a, d) in items]
 
 
-def generate(seed: int, n: int, n_context: int = 2) -> list[OODTrace]:
+def generate(seed: int, n: int, n_context: int = 2, grounded: bool = False) -> list[OODTrace]:
+    """Generate factual-QA traces.
+
+    grounded=False (default): the answer requires world knowledge (pure recall).
+    grounded=True: the target answer is STATED in an earlier context turn, so it
+    is derivable from the trace. This is the confirmatory variant — it isolates
+    whether the Phase 1 factual failure is about non-derivability (recall) or the
+    factual domain per se. Prediction: grounded jumps to high AUROC.
+    """
     rng = random.Random(seed)
     flat = _flat_facts()
+    domain = "factual_grounded" if grounded else "factual_qa"
     traces: list[OODTrace] = []
     for _ in range(n):
         turns = [Turn(role="system", content=SYSTEM, is_self=False, step_index=None)]
-        # a couple of unrelated context Q/A (genuine)
         ctx = rng.sample(flat, k=min(n_context, len(flat)))
         step = 0
         for (_, q, a, _d) in ctx:
@@ -73,20 +81,34 @@ def generate(seed: int, n: int, n_context: int = 2) -> list[OODTrace]:
             turns.append(Turn(role="assistant", content=f"{a}.", is_self=True, step_index=step))
             step += 1
 
-        negation_correct = rng.random() < 0.3
-        if negation_correct:
+        negation_correct = (not grounded) and rng.random() < 0.3
+        if grounded:
+            _cat, q, a, distractors = rng.choice(flat)
+            # State the answer in-context, making it derivable.
+            turns.append(Turn(role="user",
+                              content=f'For reference: the answer to "{q}" is {a}.',
+                              is_self=False, step_index=step))
+            turns.append(Turn(role="assistant", content="Noted.", is_self=True, step_index=step))
+            step += 1
+            picks = rng.sample(distractors, k=min(3, len(distractors)))
+            opts = [a] + picks
+            rng.shuffle(opts)
+            contents = [f"{o}." for o in opts] + [NEG_CONTENT]
+            values = list(opts) + [NEG_VALUE]
+            surfaces = ["value"] * len(opts) + ["negation"]
+            correct = opts.index(a)
+        elif negation_correct:
             q = rng.choice(UNANSWERABLE)
             contents = [NEG_CONTENT]
             values = [NEG_VALUE]
             surfaces = ["negation"]
-            # add a couple of plausible-but-wrong concrete guesses as value distractors
             for guess in rng.sample(["Tuesday", "blue", "about 4000", "42"], k=2):
                 contents.insert(0, f"It was {guess}.")
                 values.insert(0, guess)
                 surfaces.insert(0, "value")
             correct = len(contents) - 1  # negation is last
         else:
-            cat, q, a, distractors = rng.choice(flat)
+            _cat, q, a, distractors = rng.choice(flat)
             picks = rng.sample(distractors, k=min(3, len(distractors)))
             opts = [a] + picks
             rng.shuffle(opts)
@@ -107,6 +129,6 @@ def generate(seed: int, n: int, n_context: int = 2) -> list[OODTrace]:
             candidate_values=values,
             candidate_surfaces=surfaces,
         )
-        traces.append(OODTrace(domain="factual_qa", turns=turns, claim=claim,
-                               meta={"negation_correct": negation_correct}))
+        traces.append(OODTrace(domain=domain, turns=turns, claim=claim,
+                               meta={"negation_correct": negation_correct, "grounded": grounded}))
     return traces

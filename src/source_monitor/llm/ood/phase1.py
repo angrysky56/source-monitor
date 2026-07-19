@@ -21,7 +21,13 @@ import numpy as np
 
 from source_monitor.metrics import auroc
 from source_monitor.llm.cache import load_model
-from source_monitor.llm.ood import arithmetic, code_trace, entity_prose, factual_qa
+from source_monitor.llm.ood import (
+    arithmetic,
+    code_trace,
+    entity_prose,
+    factual_grounded,
+    factual_qa,
+)
 from source_monitor.llm.ood.base import (
     ClaimScore,
     OODTrace,
@@ -36,6 +42,7 @@ DOMAINS: dict[str, tuple[Any, bool]] = {
     "entity_prose": (entity_prose, True),
     "arithmetic": (arithmetic, True),
     "factual_qa": (factual_qa, True),
+    "factual_grounded": (factual_grounded, True),
     "code_trace": (code_trace, False),
 }
 AGGS = ("mean", "max", "value")

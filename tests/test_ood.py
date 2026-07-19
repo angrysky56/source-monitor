@@ -137,3 +137,14 @@ def test_scorers_run_on_mock():
     ct = code_trace.generate(1, 1)[0]
     assert contrastive_claim_score(model, tok, ct, "cpu") is None
     assert raw_claim_score(model, tok, ct, "cpu") is not None
+
+
+def test_factual_grounded_states_answer_in_context():
+    from source_monitor.llm.ood import factual_grounded
+
+    for tr in factual_grounded.generate(3, 30):
+        assert tr.meta["grounded"] is True
+        assert tr.claim.surface_type == "value"  # grounded traces are value-correct
+        answer = tr.claim.candidate_values[tr.claim.correct_index]
+        ctx = " ".join(t.content for t in tr.turns[:-1])
+        assert answer in ctx  # the correct answer is derivable from an earlier turn
