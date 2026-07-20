@@ -46,6 +46,45 @@ def rank_accuracy(model: Any, tok: Any, traces, device: str) -> float:
 
 
 @torch.no_grad()
+def _ranks_correct_excised(model: Any, tok: Any, trace, device: str) -> bool | None:
+    """Like _ranks_correct, but the planted lie's tokens are attention-masked out
+    (excised → turned into a hole) before scoring. Tests whether the model
+    re-derives the correct answer once the lie is removed from attention."""
+    from source_monitor.llm.provenance import tokenize_with_provenance
+    from source_monitor.llm.task_render import Trace
+
+    claim = trace.claim
+    ci = trace.meta.get("corrupt_turn_index")
+    if ci is None:
+        return None
+    prefix_turns = trace.turns[: claim.turn_index]
+    pre = Trace(turns=prefix_turns, query_object="", ground_truth_final="", op_kinds=[], task=None)
+    _ids, spans = tokenize_with_provenance(tok, pre, device)
+    if ci >= len(spans):
+        return None
+    hs, he = spans[ci].start_token, spans[ci].end_token  # lie's content token span
+    prefix_text = render_chatml(prefix_turns)
+
+    best_i, best_lp = -1, -1e30
+    for i, (content, value) in enumerate(zip(claim.candidate_contents, claim.candidate_values)):
+        ids, cpos, _v = _encode_candidate(tok, prefix_text, content, value)
+        attn = torch.ones_like(ids)
+        attn[0, hs:he] = 0  # excise the lie
+        logits = model(ids.to(device), attention_mask=attn.to(device)).logits[0]
+        mean_lp, _ = _mean_lp(logits, ids[0], cpos)
+        if mean_lp > best_lp:
+            best_lp, best_i = mean_lp, i
+    return best_i == claim.correct_index
+
+
+@torch.no_grad()
+def rank_accuracy_excised(model: Any, tok: Any, traces, device: str) -> float:
+    res = [_ranks_correct_excised(model, tok, tr, device) for tr in traces]
+    res = [r for r in res if r is not None]
+    return sum(res) / len(res) if res else float("nan")
+
+
+@torch.no_grad()
 def evaluate(model: Any, tok: Any, seed: int, n: int, device: str) -> dict[str, float]:
     clean = entity_prose.generate(seed, n)
     planted = entity_prose.generate(seed, n, corrupt_mid=True)  # lie in a mid ack
