@@ -21,8 +21,13 @@ from source_monitor.llm.telemetry import (
 )
 
 NEG_CUES = (
-    "nowhere", "isn't anywhere", "is not anywhere", "not anywhere",
-    "no longer anywhere", "been removed", "was removed",
+    "nowhere",
+    "isn't anywhere",
+    "is not anywhere",
+    "not anywhere",
+    "no longer anywhere",
+    "been removed",
+    "was removed",
 )
 
 
@@ -35,8 +40,9 @@ def build_context(tokenizer: Any, trace, device: str):
     appended (same string prefix ⇒ same token prefix).
     """
     ctx_turns = trace.turns[: trace.claim.turn_index]
-    pre = Trace(turns=ctx_turns, query_object="", ground_truth_final="",
-                op_kinds=[], task=None)  # type: ignore[arg-type]
+    pre = Trace(
+        turns=ctx_turns, query_object="", ground_truth_final="", op_kinds=[], task=None
+    )  # type: ignore[arg-type]
     _ids, spans = tokenize_with_provenance(tokenizer, pre, device)
     asst = [
         (i, s.start_token, s.end_token)
@@ -51,7 +57,9 @@ def build_context(tokenizer: Any, trace, device: str):
 @torch.no_grad()
 def span_scores(model: Any, input_ids, spans) -> list[float]:
     """Value-only retrospective surprisal per assistant emission (the detector)."""
-    return [s.slot_only_neglogp for s in retrospective_surprisal(model, input_ids, spans)]
+    return [
+        s.slot_only_neglogp for s in retrospective_surprisal(model, input_ids, spans)
+    ]
 
 
 def flag_index(scores: list[float], k: float) -> int | None:
@@ -75,16 +83,20 @@ def holed_mask(input_ids, start: int, end: int):
 
 
 @torch.no_grad()
-def generate_answer(model: Any, tokenizer: Any, input_ids, attention_mask,
-                    max_new_tokens: int) -> str:
+def generate_answer(
+    model: Any, tokenizer: Any, input_ids, attention_mask, max_new_tokens: int
+) -> str:
     pad = getattr(tokenizer, "pad_token_id", None)
     if pad is None:
         pad = getattr(tokenizer, "eos_token_id", 0)
     out = model.generate(
-        input_ids=input_ids, attention_mask=attention_mask,
-        max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=pad,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        pad_token_id=pad,
     )
-    return tokenizer.decode(out[0, input_ids.shape[1]:], skip_special_tokens=True)
+    return tokenizer.decode(out[0, input_ids.shape[1] :], skip_special_tokens=True)
 
 
 def parse_answer(text: str, trace) -> int | None:
@@ -99,7 +111,7 @@ def parse_answer(text: str, trace) -> int | None:
     # longest match first, so "the attic" beats a bare substring
     hits = [
         (len(v), i)
-        for i, (v, s) in enumerate(zip(values, surfaces))
+        for i, (v, s) in enumerate(zip(values, surfaces, strict=False))
         if s == "value" and v.lower() in t
     ]
     return max(hits)[1] if hits else None
@@ -118,8 +130,11 @@ def run_case(model: Any, tokenizer: Any, trace, cfg, condition: str) -> dict:
         ci = trace.meta.get("corrupt_turn_index")
         flagged = next(((ti, s, e) for (ti, s, e) in asst if ti == ci), None)
 
-    mask = (torch.ones_like(input_ids) if flagged is None
-            else holed_mask(input_ids, flagged[1], flagged[2]))
+    mask = (
+        torch.ones_like(input_ids)
+        if flagged is None
+        else holed_mask(input_ids, flagged[1], flagged[2])
+    )
     text = generate_answer(model, tokenizer, input_ids, mask, cfg.max_new_tokens)
 
     parsed = parse_answer(text, trace)
@@ -127,7 +142,9 @@ def run_case(model: Any, tokenizer: Any, trace, cfg, condition: str) -> dict:
     return {
         "condition": condition,
         "answer": text.strip()[:120],
-        "correct": bool(parsed == trace.claim.correct_index) if parsed is not None else False,
+        "correct": (
+            bool(parsed == trace.claim.correct_index) if parsed is not None else False
+        ),
         "abstain": parsed is None,
         "excised": flagged is not None,
         "flagged_turn": None if flagged is None else flagged[0],
