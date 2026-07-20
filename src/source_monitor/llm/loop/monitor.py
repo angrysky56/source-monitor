@@ -86,17 +86,52 @@ def span_scores(model: Any, input_ids, spans) -> list[float]:
     ]
 
 
-def flag_index(scores: list[float], k: float) -> int | None:
-    """Flag the highest-scoring span iff its within-trace z-score exceeds k."""
+def flag_index(
+    scores: list[float],
+    k: float = 1.5,
+    floor: float | None = None,
+    mode: str = "zscore",
+) -> int | None:
+    """Flag the highest-scoring self-span, or None.
+
+    mode="zscore"   : within-trace outlier (RELATIVE). Fires on almost every trace
+                      when there are only a few spans — kept for comparison.
+    mode="absolute" : score must exceed a floor calibrated on clean traces. This
+                      is what makes the monitor quiet when nothing is wrong.
+    mode="both"     : AND of the two.
+    """
     n = len(scores)
-    if n < 2:
-        return None
-    mean = sum(scores) / n
-    std = (sum((x - mean) ** 2 for x in scores) / n) ** 0.5
-    if std <= 1e-9:
+    if n == 0:
         return None
     best = max(range(n), key=lambda i: scores[i])
-    return best if (scores[best] - mean) / std > k else None
+
+    z_ok = True
+    if mode in ("zscore", "both"):
+        if n < 2:
+            return None
+        mean = sum(scores) / n
+        std = (sum((x - mean) ** 2 for x in scores) / n) ** 0.5
+        z_ok = std > 1e-9 and (scores[best] - mean) / std > k
+
+    abs_ok = True
+    if mode in ("absolute", "both"):
+        abs_ok = floor is not None and scores[best] > floor
+
+    return best if (z_ok and abs_ok) else None
+
+
+@torch.no_grad()
+def calibrate_floor(model: Any, tokenizer: Any, traces, device: str,
+                    quantile: float = 0.99) -> float:
+    """Absolute score floor = q-th percentile of genuine self-span scores on CLEAN
+    traces. Calibrate on data held out from the eval seeds."""
+    import numpy as np
+
+    vals: list[float] = []
+    for tr in traces:
+        ids, spans, _asst = build_context(tokenizer, tr, device)
+        vals.extend(span_scores(model, ids, spans))
+    return float(np.quantile(vals, quantile)) if vals else float("inf")
 
 
 def holed_mask(input_ids, start: int, end: int):
@@ -141,13 +176,19 @@ def parse_answer(text: str, trace) -> int | None:
     return max(hits)[1] if hits else None
 
 
-def run_case(model: Any, tokenizer: Any, trace, cfg, condition: str) -> dict:
+def run_case(model: Any, tokenizer: Any, trace, cfg, condition: str,
+             floor: float | None = None) -> dict:
     """One conversation under one condition; returns the graded outcome."""
     input_ids, spans, asst = build_context(tokenizer, trace, cfg.device)
 
     flagged = None
     if condition == "monitor_on":
-        fi = flag_index(span_scores(model, input_ids, spans), cfg.k_threshold)
+        fi = flag_index(
+            span_scores(model, input_ids, spans),
+            k=cfg.k_threshold,
+            floor=floor,
+            mode=getattr(cfg, "flag_mode", "zscore"),
+        )
         if fi is not None:
             flagged = asst[fi]
     elif condition == "oracle_excise":

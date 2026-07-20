@@ -22,7 +22,7 @@ import torch
 
 from source_monitor.llm.cache import load_model
 from source_monitor.llm.loop.config import Phase3Config
-from source_monitor.llm.loop.monitor import run_case
+from source_monitor.llm.loop.monitor import calibrate_floor, run_case
 from source_monitor.llm.ood import entity_prose
 
 
@@ -44,6 +44,7 @@ def main() -> None:
     ap.add_argument("--n-traces", type=int, default=None)
     ap.add_argument("--k", type=float, default=None)
     ap.add_argument("--model", default=None)
+    ap.add_argument("--flag-mode", default=None, choices=["absolute", "zscore", "both"])
     args = ap.parse_args()
 
     cfg = Phase3Config()
@@ -53,6 +54,7 @@ def main() -> None:
         n_traces=args.n_traces or cfg.n_traces,
         k_threshold=args.k if args.k is not None else cfg.k_threshold,
         model_name=args.model or cfg.model_name,
+        flag_mode=args.flag_mode or cfg.flag_mode,
     )
     os.makedirs(cfg.results_dir, exist_ok=True)
     out_file = Path(cfg.results_dir) / "llm_phase3_results.jsonl"
@@ -60,6 +62,14 @@ def main() -> None:
     model, tok, meta = load_model(cfg.model_name, device=cfg.device, dtype=cfg.dtype,
                                   enable_thinking=False)
     model.eval()
+
+    # Absolute floor calibrated on CLEAN traces held out from the eval seeds.
+    floor = None
+    if cfg.flag_mode in ("absolute", "both"):
+        calib = entity_prose.generate(cfg.calib_seed, cfg.calib_n)
+        floor = calibrate_floor(model, tok, calib, cfg.device, cfg.calib_quantile)
+        print(f"calibrated floor (q={cfg.calib_quantile}, n={cfg.calib_n}, "
+              f"seed={cfg.calib_seed}): {floor:.3f}  [mode={cfg.flag_mode}]", flush=True)
 
     summary: dict[tuple[str, str], list[dict]] = {}
     for seed in cfg.seeds:
@@ -73,10 +83,11 @@ def main() -> None:
         ):
             for cond in conds:
                 t0 = time.time()
-                cases = [run_case(model, tok, tr, cfg, cond) for tr in traces]
+                cases = [run_case(model, tok, tr, cfg, cond, floor=floor) for tr in traces]
                 a = _agg(cases)
                 rec = {"split": split, "condition": cond, "seed": seed,
                        "model_name": cfg.model_name, "k": cfg.k_threshold,
+                       "flag_mode": cfg.flag_mode, "floor": floor,
                        "wall_s": round(time.time() - t0, 1), **a}
                 with open(out_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(rec) + "\n")

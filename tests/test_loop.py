@@ -38,6 +38,19 @@ def test_flag_index_z_rule():
     assert flag_index(scores, 5.0) is None                  # threshold above the outlier
 
 
+def test_absolute_floor_keeps_the_monitor_quiet_when_nothing_is_wrong():
+    """The relative z-rule fires on a quiet trace; the absolute floor must not."""
+    quiet = [1.0, 1.05, 1.1, 1.4]  # nothing wrong, but the max is still ~1.7 sigma
+    assert flag_index(quiet, k=1.5, mode="zscore") == 3  # the P-3.3 failure mode
+    assert flag_index(quiet, floor=5.0, mode="absolute") is None
+    assert flag_index(quiet, k=1.5, floor=5.0, mode="both") is None
+
+    loud = [1.0, 1.0, 1.0, 9.0]  # a genuinely surprising span
+    assert flag_index(loud, floor=5.0, mode="absolute") == 3
+    assert flag_index(loud, floor=12.0, mode="absolute") is None
+    assert flag_index(loud, k=1.5, floor=5.0, mode="both") == 3
+
+
 def test_holed_mask_zeros_exactly_the_span():
     ids = torch.arange(10).unsqueeze(0)
     m = holed_mask(ids, 3, 6)

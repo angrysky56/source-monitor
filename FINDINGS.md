@@ -42,8 +42,34 @@ locations, so an ungated grader would score the model's deliberation instead of
 its answer. (2) A literal negation cue list mis-scored correct answers
 ("is not CURRENTLY anywhere") as abstains; replaced with a pattern. Both tested.
 
-**Next:** (1) absolute/calibrated threshold, then re-run (cheap — this is a
-policy change, not a mechanism change); (2) long-ξ task; (3) 4B.
+**F21e — FIXED: an absolute calibrated floor makes the monitor quiet when idle
+(P-3.3 PASS).** Replaced the relative within-trace z-rule with an ABSOLUTE floor =
+the 99th percentile of genuine self-span scores on CLEAN traces held out from the
+eval seeds (floor = 16.26 nats for Qwen3-1.7B / entity_prose).
+
+    metric                 z-rule    absolute floor
+    clean false excision    .956        .017
+    clean accuracy          .961       1.000
+    flag hit rate           .952        .993
+    planted monitor_on      .961        .944
+
+P-3.3 PASS (excise .017, zero accuracy cost); P-3.2 PASS harder (hit .993, within
+.034 of oracle). P-3.1 = +.111 against an oracle ceiling of +.145, i.e. 77% of the
+achievable repair (the +.15 bar remains above the ceiling — see F21b).
+
+The trade is explicit and tunable: q=.99 is conservative, so the floor misses ~19%
+of lies (planted excise .917 -> .811), which is why monitor_on dips slightly.
+`calib_quantile` is the precision/recall knob — lower it to catch more lies at the
+cost of more idle excisions. Both the MECHANISM and the TRIGGER POLICY are now
+validated; a relative outlier test is the wrong policy at small span counts because
+"most surprising span" is not "actually surprising span".
+
+**Next:** (1) span SEGMENTATION for free-form text — the one real generality gap
+(the templated task gave us "one claim per turn" for free; sentence/clause
+splitting is the v1); (2) verify logprob fidelity under GGUF/quantization and
+recalibrate the floor per quant level (excision there is a context edit, which is
+strictly easier than our attention-mask); (3) monitor the model's own REASONING
+(<think> blocks) rather than only its final claims; (4) long-ξ task; (5) 4B.
 
 ## F20 — Phase 2 (hole-rehearsal LoRA): holes alone do NOT repair visible
 ## lies (P-2.1 FAIL) — a faithful reproduction of toy F11, with a task-ξ
