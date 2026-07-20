@@ -56,7 +56,7 @@ NEG_TEMPLATES = [
 NEG_VALUES = ["isn't anywhere anymore", "no longer anywhere"]
 
 
-def generate(seed: int, n: int, n_ops: int = 5) -> list[OODTrace]:
+def generate(seed: int, n: int, n_ops: int = 5, corrupt_mid: bool = False) -> list[OODTrace]:
     rng = random.Random(seed)
     traces: list[OODTrace] = []
     for _ in range(n):
@@ -68,7 +68,7 @@ def generate(seed: int, n: int, n_ops: int = 5) -> list[OODTrace]:
         turns.append(Turn(role="user", content=rng.choice(PUT_PHRASES).format(o=obj, l=cur),
                           is_self=False, step_index=0))
         turns.append(Turn(role="assistant", content=rng.choice(ACK_PHRASES).format(o=obj, l=cur),
-                          is_self=True, step_index=0))
+                          is_self=True, step_index=0, claim_surface="container", location_text=cur))
         mentioned = [cur]  # locations that actually appear in-context (anti-confound)
         removed = False
         for k in range(1, n_ops):
@@ -83,11 +83,27 @@ def generate(seed: int, n: int, n_ops: int = 5) -> list[OODTrace]:
                 turns.append(Turn(role="user", content=rng.choice(MOVE_PHRASES).format(o=obj, l=nxt),
                                   is_self=False, step_index=k))
                 turns.append(Turn(role="assistant", content=rng.choice(ACK_PHRASES).format(o=obj, l=nxt),
-                                  is_self=True, step_index=k))
+                                  is_self=True, step_index=k, claim_surface="container", location_text=nxt))
                 cur = nxt
                 if nxt not in mentioned:
                     mentioned.append(nxt)
                 removed = False
+
+        # Corruption-exposure (Phase 2): plant a false location in a non-final ack.
+        # The true final location is unchanged, so the final claim stays correct;
+        # this is a lie in-context that later emissions must re-derive past.
+        corrupt_turn_index = None
+        if corrupt_mid and len(mentioned) >= 2:
+            ack_idxs = [i for i, t in enumerate(turns)
+                        if t.role == "assistant" and t.location_text in mentioned]
+            if ack_idxs:
+                ti = rng.choice(ack_idxs)
+                old = turns[ti].location_text
+                wrong = rng.choice([m for m in mentioned if m != old])
+                turns[ti].content = turns[ti].content.replace(old, wrong)
+                turns[ti].is_corrupted = True
+                turns[ti].location_text = wrong
+                corrupt_turn_index = ti
 
         # Final query + claim (candidates = in-context locations + negation).
         claim_tmpl = rng.choice(CLAIM_TEMPLATES)
@@ -112,5 +128,5 @@ def generate(seed: int, n: int, n_ops: int = 5) -> list[OODTrace]:
             candidate_surfaces=surfaces,
         )
         traces.append(OODTrace(domain="entity_prose", turns=turns, claim=claim,
-                               meta={"removed": removed}))
+                               meta={"removed": removed, "corrupt_turn_index": corrupt_turn_index}))
     return traces
