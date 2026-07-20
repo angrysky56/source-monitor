@@ -34,10 +34,22 @@ costs nothing -> hole-rehearsal has no re-derivation pressure. Prediction:
 hole-rehearsal should only bite on a long-ξ task (arithmetic running total;
 "where was X N steps ago").
 
-**Next (owed):** (1) excised-lie eval — mask the planted lie at inference (turn it
-into a hole) and test whether drop re-derives BETTER than base across the
-excision; reuses saved adapters, no retraining (F13b logic, bridge to Phase 3).
-(2) re-run drop on a long-ξ task. (3) Phase 3: detect -> excise -> regenerate.
+**F20e — EXCISION repairs the blind spot; hole-rehearsal adds nothing on this
+(short-ξ) task (excised-lie eval, saved adapters, 3 seeds).** Planted-error
+final-answer accuracy, lie VISIBLE -> EXCISED (attention-masked at inference):
+base_noft .68->.86 (+.18), base(LoRA) .79->.998 (+.21), drop .78->1.000 (+.22).
+drop vs base under excision: 1.000 vs .998 (Δ+.002, negligible). Conclusion: the
+repair leg is EXCISE-AND-REGENERATE at inference (SEER Layer 4), NOT the
+hole-rehearsal training; what training buys is COMPETENCE (base LoRA .88->1.0),
+which makes excision-recovery near-perfect. drop~base confirms F20d — hole
+rehearsal's distinct value needs a long-ξ task. This closes the loop the toy
+predicted (monitor-first; true removal, not soft discount; robustness structural)
+at LLM scale: detect (Phase 0/1) + excise-and-regenerate (here) = repair.
+
+**Next (owed):** (1) re-run drop on a long-ξ task (arithmetic running total) to
+test hole-rehearsal's reserved role. (2) Phase 3: wire the closed loop on free
+generation (detect -> excise/KV-evict -> regenerate; abstain; escalate factual
+claims to external verification per F19d).
 
 ## F19 — Phase 1 (OOD transfer): the signal ports for CONTEXT-DERIVABLE
 ## claims (3/4 domains), fails on pure factual RECALL — and recall
