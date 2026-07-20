@@ -1,5 +1,44 @@
 # source-monitor — findings log
 
+## F20 — Phase 2 (hole-rehearsal LoRA): holes alone do NOT repair visible
+## lies (P-2.1 FAIL) — a faithful reproduction of toy F11, with a task-ξ
+## confound (2026-07-19; Qwen3-1.7B, 3 arms x 3 seeds).
+
+    arm         competence     planted_acc    bsi            detect_auroc
+    base_noft   .877           .680           .197           .979
+    base(LoRA)  1.000          .787           .213           1.000
+    drop(holes) 1.000          .783           .217           .999
+    corrupt     1.000          1.000          .000           .999
+
+**F20a — Ordinary fine-tuning fixes competence, not the blind spot.** base
+(LoRA, no holes) drives competence .88->1.0 and detection ->1.0, but bsi stays
+~.21 (planted self-lie still derails the final answer ~20% of the time).
+
+**F20b — Hole-rehearsal alone does NOT reduce bsi (drop .217 ~ base .213).**
+Reproduces toy F11: rehearsing ABSENCE (attention-masked emissions) does not
+create distrust of a VISIBLE, plausible lie (absent != visibly-false). In the toy
+(F13b) repair required detection -> true EVICTION (turn the lie into a hole) ->
+rehearsed re-derivation. The Phase 2 eval leaves the lie visibly in context with
+no excision, so holes have nothing to act on. Detection survives LoRA (P-2.3 PASS).
+
+**F20c — corrupt bsi=.000 is IN-DISTRIBUTION memorization, not transfer.** The
+corrupt arm trained and was evaluated on the SAME mid-ack lie; perfect repair is
+expected and uninformative. Real test (P-2.2 held-out corruption type) not yet
+implemented; toy F4 predicts corrupt-exposure is type-bound.
+
+**F20d — Task-ξ confound (Haggi-Mani & Rish 2026, arXiv:2607.15449, "Relevant and
+Irrelevant: an RG analysis of attention").** Their result: attention to prior
+tokens is "irrelevant" for short correlation-length (ξ) data. entity_prose's
+answer is derivable from the LAST user turn (short ξ), so masking PRIOR emissions
+costs nothing -> hole-rehearsal has no re-derivation pressure. Prediction:
+hole-rehearsal should only bite on a long-ξ task (arithmetic running total;
+"where was X N steps ago").
+
+**Next (owed):** (1) excised-lie eval — mask the planted lie at inference (turn it
+into a hole) and test whether drop re-derives BETTER than base across the
+excision; reuses saved adapters, no retraining (F13b logic, bridge to Phase 3).
+(2) re-run drop on a long-ξ task. (3) Phase 3: detect -> excise -> regenerate.
+
 ## F19 — Phase 1 (OOD transfer): the signal ports for CONTEXT-DERIVABLE
 ## claims (3/4 domains), fails on pure factual RECALL — and recall
 ## detection INVERTS with scale (2026-07-19; n=200 x 3 seeds, 1.7B + 4B).
