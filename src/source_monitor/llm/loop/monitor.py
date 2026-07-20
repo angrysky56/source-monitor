@@ -8,6 +8,7 @@ only new logic is the flagging rule, the mask construction, and free-text gradin
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import torch
@@ -20,15 +21,38 @@ from source_monitor.llm.telemetry import (
     retrospective_surprisal,
 )
 
-NEG_CUES = (
-    "nowhere",
-    "isn't anywhere",
-    "is not anywhere",
-    "not anywhere",
-    "no longer anywhere",
-    "been removed",
-    "was removed",
+# Absence is expressed with arbitrary adverbs ("is not CURRENTLY anywhere"), so a
+# literal cue list silently mis-scores correct negations as abstains. Require the
+# unambiguous absence word (nowhere / ...anywhere) with up to two words of slack.
+# "removed" is deliberately NOT a cue: it co-occurs with locations ("was removed
+# from the attic, now in the cellar") and would fire falsely.
+_NEG_RE = re.compile(
+    r"nowhere|(?:isn'?t|is not|not|no longer)\s+(?:\w+\s+){0,2}anywhere",
+    re.IGNORECASE,
 )
+
+# Qwen3 emits <think>...</think> scaffolding by default when given a bare
+# assistant header. Prefilling an EMPTY think block is the documented way to
+# disable it. Without this the model spends the whole token budget reasoning and
+# never emits an answer (the Phase 3 all-abstain bug). Note: cache.load_model's
+# enable_thinking flag is metadata only — it never affected generation, which
+# went unnoticed because Phases 0-2 were entirely teacher-forced.
+THINK_OFF = "<think>\n\n</think>\n\n"
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def strip_think(text: str) -> str:
+    """Drop think blocks so grading sees the ANSWER, not the reasoning.
+
+    Critical for correctness: the reasoning trace names locations ("moved it to
+    the cellar"), so an ungated grader would score the model's deliberation
+    instead of its final claim.
+    """
+    text = _THINK_RE.sub(" ", text)
+    if "<think>" in text:  # unterminated: budget ran out mid-reasoning
+        text = text.split("<think>")[0]
+    return text.strip()
 
 
 def build_context(tokenizer: Any, trace, device: str):
@@ -49,7 +73,7 @@ def build_context(tokenizer: Any, trace, device: str):
         for i, s in enumerate(spans)
         if s.kind == "assistant" and s.end_token > s.start_token
     ]
-    text = render_chatml(ctx_turns) + _ASSISTANT_HEADER
+    text = render_chatml(ctx_turns) + _ASSISTANT_HEADER + THINK_OFF
     enc = tokenizer(text, return_tensors="pt")
     return enc["input_ids"].to(device), spans, asst
 
@@ -106,7 +130,7 @@ def parse_answer(text: str, trace) -> int | None:
     surfaces = claim.candidate_surfaces or []
     values = claim.candidate_values or []
     neg_idx = [i for i, s in enumerate(surfaces) if s == "negation"]
-    if neg_idx and any(c in t for c in NEG_CUES):
+    if neg_idx and _NEG_RE.search(t):
         return neg_idx[0]
     # longest match first, so "the attic" beats a bare substring
     hits = [
@@ -135,7 +159,8 @@ def run_case(model: Any, tokenizer: Any, trace, cfg, condition: str) -> dict:
         if flagged is None
         else holed_mask(input_ids, flagged[1], flagged[2])
     )
-    text = generate_answer(model, tokenizer, input_ids, mask, cfg.max_new_tokens)
+    raw = generate_answer(model, tokenizer, input_ids, mask, cfg.max_new_tokens)
+    text = strip_think(raw)
 
     parsed = parse_answer(text, trace)
     ci = trace.meta.get("corrupt_turn_index")

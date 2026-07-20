@@ -18,6 +18,6 @@ class Phase3Config:
     # external calibration set; k trades false excisions against misses.
     k_threshold: float = 1.5
 
-    max_new_tokens: int = 24
+    max_new_tokens: int = 48  # headroom even with thinking disabled
     conditions: tuple[str, ...] = ("monitor_off", "monitor_on", "oracle_excise")
     results_dir: str = "results"

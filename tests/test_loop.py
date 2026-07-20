@@ -54,7 +54,21 @@ def test_parse_answer_values_negation_and_abstain():
     assert parse_answer(f"I believe it is in {vals[vi]} right now.", tr) == vi
     ni = surfs.index("negation")
     assert parse_answer("It isn't anywhere anymore.", tr) == ni
+    # Real model phrasings (regression: a literal cue list missed these)
+    assert parse_answer("The blue mug is not currently anywhere.", tr) == ni
+    assert parse_answer("It is no longer anywhere in the house.", tr) == ni
+    assert parse_answer("The mug is nowhere.", tr) == ni
     assert parse_answer("Bananas and telescopes.", tr) is None  # abstain
+
+
+def test_strip_think_hides_reasoning_from_the_grader():
+    from source_monitor.llm.loop.monitor import strip_think
+
+    assert strip_think("<think>maybe the cellar</think>It is in the attic.") == "It is in the attic."
+    # Unterminated think block (budget ran out mid-reasoning): the reasoning names
+    # locations, so NOTHING may survive to be graded.
+    assert strip_think("<think>Let me check. It was moved to the cellar") == ""
+    assert strip_think("It is in the attic.") == "It is in the attic."
 
 
 def test_build_context_excludes_claim_and_spans_are_valid():

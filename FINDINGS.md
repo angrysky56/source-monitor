@@ -1,5 +1,50 @@
 # source-monitor — findings log
 
+## F21 — Phase 3 (closed loop on FREE generation): the loop WORKS; the
+## trigger policy does not (2026-07-19; Qwen3-1.7B, n=60 x 3 seeds).
+
+    split     condition        accuracy   excise   flag hit
+    planted   monitor_off      .833       .000     --
+    planted   monitor_on       .961       .917     .952
+    planted   oracle_excise    .978       1.000    1.000
+    clean     monitor_off      1.000      .000     --
+    clean     monitor_on       .961       .956     .000
+
+**F21a — The endpoint demo works.** On free generation, with no teacher forcing
+and no candidates supplied, the loop detects a false statement in the model's own
+earlier turn, excises it, and regenerates: .833 -> .961, i.e. the error rate falls
+16.7% -> 3.9% (a 77% cut). Detection is a near-perfect TRIGGER: flag hit .952 and
+monitor_on lands within .017 of oracle_excise -> **P-3.2 PASS**; the detector is
+not the bottleneck.
+
+**F21b — P-3.1's "FAIL" is a BAR error, not a mechanism failure (my
+pre-registration was wrong).** oracle_excise = .978 against monitor_off .833, so
+the MAXIMUM achievable gain on this task is +.145 — below the +.15 bar I
+pre-registered. The bar exceeded the task's ceiling. The loop captured
+.128/.145 = 88% of the achievable repair. Report it that way, not as a failure.
+
+**F21c — P-3.3 FAIL is the real, actionable defect: the trigger is
+indiscriminate.** On CLEAN traces the monitor excises 95.6% of the time and costs
+3.9 points of accuracy (1.000 -> .961). Cause: the flag rule is a purely RELATIVE
+within-trace z-score. With only ~4-5 spans per trace the maximum is almost always
+>= 1.5 sigma (for n=5 the largest possible z is ~2.0), so it fires whether or not
+anything is wrong. FIX: require an ABSOLUTE floor — the Phase 1 per-domain
+calibrated affine — alone or ANDed with the relative z. Planted lies carry
+genuinely high absolute surprisal; clean spans do not.
+
+**F21d — Two harness bugs, both surfaced only because this is the first phase
+that GENERATES.** (1) Qwen3's <think> scaffolding was never actually disabled:
+`enable_thinking=False` was recorded as metadata but never affected generation, so
+the model spent its whole budget reasoning and emitted no answer (all conditions
+abstain=1.000, an uninterpretable first run). Fixed by prefilling the empty think
+block, plus stripping any leaked think text BEFORE grading — the reasoning names
+locations, so an ungated grader would score the model's deliberation instead of
+its answer. (2) A literal negation cue list mis-scored correct answers
+("is not CURRENTLY anywhere") as abstains; replaced with a pattern. Both tested.
+
+**Next:** (1) absolute/calibrated threshold, then re-run (cheap — this is a
+policy change, not a mechanism change); (2) long-ξ task; (3) 4B.
+
 ## F20 — Phase 2 (hole-rehearsal LoRA): holes alone do NOT repair visible
 ## lies (P-2.1 FAIL) — a faithful reproduction of toy F11, with a task-ξ
 ## confound (2026-07-19; Qwen3-1.7B, 3 arms x 3 seeds).
