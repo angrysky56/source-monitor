@@ -58,11 +58,12 @@ def train_arm(cfg: Phase2Config, arm: str, seed: int, adapter_root: Path) -> str
     for step, batch in enumerate(iterate_batches(exs, cfg.batch_size, cfg.steps, seed)):
         b = {k: v.to(cfg.device) for k, v in collate(batch).items()}
         out = model(input_ids=b["input_ids"], attention_mask=b["attention_mask"], use_cache=False)
-        logits = out.logits[:, :-1, :].float()
-        labels = b["labels"][:, 1:]
-        loss = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)), labels.reshape(-1), ignore_index=-100
-        )
+        shift_labels = b["labels"][:, 1:]
+        mask = shift_labels != -100
+        # CE only on supervised positions: avoids materializing a full-vocab
+        # float32 tensor over ALL positions (the OOM source on the 12GB card).
+        sel_logits = out.logits[:, :-1, :][mask]  # (n_supervised, vocab)
+        loss = F.cross_entropy(sel_logits.float(), shift_labels[mask])
         loss.backward()
         opt.step()
         opt.zero_grad()
@@ -99,19 +100,32 @@ def main() -> None:
     adapter_root = Path(cfg.results_dir) / "phase2_adapters"
     out_file = Path(cfg.results_dir) / "llm_phase2_results.jsonl"
 
-    # Baseline: un-fine-tuned model, once per seed.
-    base, tok, _ = load_model(cfg.model_name, device=cfg.device, dtype=cfg.dtype, enable_thinking=False)
-    base.eval()
-    for seed in cfg.seeds:
-        m = evaluate(base, tok, seed, cfg.n_eval, cfg.device)
-        _write(out_file, {"arm": "base_noft", "seed": seed, "model_name": cfg.model_name, **m})
-        print("base_noft", seed, m, flush=True)
-    del base
-    gc.collect()
-    torch.cuda.empty_cache()
+    # Resume: skip (arm, seed) already persisted.
+    done: set[tuple[str, int]] = set()
+    if out_file.exists():
+        for line in open(out_file, encoding="utf-8"):
+            r = json.loads(line)
+            done.add((r["arm"], int(r["seed"])))
+
+    # Baseline: un-fine-tuned model, once per seed (skip completed).
+    base_todo = [s for s in cfg.seeds if ("base_noft", s) not in done]
+    if base_todo:
+        base, tok, _ = load_model(cfg.model_name, device=cfg.device, dtype=cfg.dtype,
+                                  enable_thinking=False)
+        base.eval()
+        for seed in base_todo:
+            m = evaluate(base, tok, seed, cfg.n_eval, cfg.device)
+            _write(out_file, {"arm": "base_noft", "seed": seed, "model_name": cfg.model_name, **m})
+            print("base_noft", seed, m, flush=True)
+        del base
+        gc.collect()
+        torch.cuda.empty_cache()
 
     for arm in cfg.arms:
         for seed in cfg.seeds:
+            if (arm, seed) in done:
+                print(f"skip {arm} seed{seed} (already done)", flush=True)
+                continue
             t0 = time.time()
             adir = train_arm(cfg, arm, seed, adapter_root)
             model, tok, _ = load_for_eval(cfg.model_name, cfg.device, cfg.dtype, adir)

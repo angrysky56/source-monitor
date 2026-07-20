@@ -35,7 +35,7 @@ class Phase2Config:
     seeds: tuple[int, ...] = (42, 137, 2024)
     steps: int = 300
     lr: float = 1e-4
-    batch_size: int = 4
+    batch_size: int = 2  # 12GB 3060: keep the per-step activation/logits footprint small
     grad_accum: int = 1
     warmup: int = 20
 
