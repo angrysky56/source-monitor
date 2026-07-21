@@ -102,7 +102,50 @@ cost, which is strictly cheaper than the weight perturbation F23 uses.
 
 - **H-ens-4 (router ensemble), NOT yet testable here.** Needs an MoE checkpoint
   that fits 12 GB. Qwen3-30B-A3B does not (~60 GB bf16). OLMoE-1B-7B (~7B total)
-  is the plausible candidate, likely 8-bit. Deferred, not rejected.
+  is the plausible candidate, likely 8-bit. Deferred, not rejected. See F22e —
+  a local GGUF MoE does NOT unlock this.
+
+**F22e — Unsloth Studio's API cannot host the detector (probed 2026-07-21,
+localhost:8889, `unsloth/Qwen-AgentWorld-35B-A3B-GGUF:UD-Q4_K_XL`, llama.cpp
+build b10069).** Tested against the live endpoint, not the docs:
+
+    /v1/chat/completions + logprobs   -> 400 "logprobs is not supported
+                                          for chat completions"
+    /v1/completions + echo:true       -> echo SILENTLY IGNORED. 7 prompt tokens
+                                          in, 1 logprob entry out (the generated
+                                          token only)
+    /v1/completions + prompt_logprobs -> ignored (vLLM-ism), logprobs: null
+    /completion, /tokenize, /props    -> 405, wrapper does not expose the
+                                          native llama.cpp surface
+
+The detector needs per-token logprobs for text ALREADY IN THE CONTEXT
+(teacher-forced retrospective surprisal). This API only returns logprobs for
+tokens it generates, so the answer is no. Scoring token-by-token via top-N
+lookup is not a workaround: a planted lie's token is exactly the one that falls
+outside the top-N, so the data would be censored precisely at the tail the
+detector exists to measure.
+
+**Revises the GGUF risk assessment from the previous session.** The stated worry
+was logprob FIDELITY under quantization (the floor is calibrated in nats). The
+actual blocker is one level upstream — the logprobs are not exposed at all.
+Fidelity remains untested because it is unreachable from here.
+
+**The GGUF path is still open, just not through Unsloth.** The weights are already
+in the HF cache (`models--unsloth--Qwen-AgentWorld-35B-A3B-GGUF`).
+`llama-cpp-python` with `logits_all=True` (or `create_completion(echo=True,
+logprobs=N)`) does return prompt-token logprobs. Not installed in either venv —
+needs `uv pip install llama-cpp-python` before the quantization-calibration test
+can run.
+
+**And it does NOT unlock H-ens-4, despite being an MoE.** 35B-A3B is the right
+shape, but router perturbation needs per-expert routing control in Python, which
+llama.cpp does not expose either. MoE-over-GGUF gets us neither the scoring nor
+the router. H-ens-4 still needs HF transformers (OLMoE-1B-7B).
+
+Working as an agent endpoint, for the record: tool calling verified good
+(`finish_reason: tool_calls`, well-formed arguments, 37.8 tok/s), plus
+Anthropic-dialect `/v1/messages` and server-side python/web_search/terminal
+tools. Fine for agent work; wrong instrument for this measurement.
 
 ## F21 — Phase 3 (closed loop on FREE generation): the loop WORKS; the
 ## trigger policy does not (2026-07-19; Qwen3-1.7B, n=60 x 3 seeds).
