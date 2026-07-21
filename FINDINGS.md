@@ -1,5 +1,109 @@
 # source-monitor — findings log
 
+## F22 — Unbelievable marginals: a theoretical account of F20a, and a
+## pre-registered ensemble test (2026-07-21). THEORY + DESIGN — NO RESULTS YET.
+
+Source: Pitkow, Ahmadian & Miller, _Learning unbelievable probabilities_, Adv
+Neural Inf Process Syst 24:738–746 (2011). Read into the project 2026-07-21.
+
+**This entry contains no measurements.** It is a framing plus three
+pre-registered hypotheses. Results land in F23. Do not cite F22 as evidence.
+
+**F22a — There exist inference targets that NO parameter setting can reach.**
+Stable fixed points of loopy belief propagation are minima of the Bethe free
+energy, so a target is reachable only where the Bethe Hessian is positive-definite
+there. Pitkow et al. prove many ordinary marginals fail that test — minimal
+example: 4 binary nodes, uniform pairwise coupling, J > 0.316 — and name them
+*unbelievable*: BP cannot converge to them **for any parameters**, so every
+learning algorithm aimed at them necessarily fails, sometimes landing worse than
+no learning at all. Not a corner case: for 8-node fully-connected Ising models
+with random couplings, most targets go unbelievable once coupling is moderate.
+
+**F22b — That is F20a's structure, stated as a theorem in a different system.**
+F20a found LoRA drives competence .88->1.0 and detection ->1.0 while bsi holds at
+~.21; F20e found the repair leg is excise-and-regenerate at INFERENCE, not any
+training intervention. Pitkow et al. supply the clean reason a system can behave
+that way: when an approximate inference procedure's REACHABLE SET excludes the
+correct answer, parameter search is the wrong search. This is the strongest
+theoretical argument the project has for why SEER is an inference-time loop
+rather than a fine-tune.
+
+**STATED LIMIT — do not overclaim.** Transformers do not run loopy BP. The
+theorem does not transfer as a theorem, and no result in this repo depends on it.
+What transfers is an existence proof for a CATEGORY — errors that are not training
+errors — plus evidence the category is common. F22 is framing and a hypothesis
+source, never evidence.
+
+**F22c — Their remedy is an ensemble, which suggests a detector upgrade.** When
+the target is unbelievable, Bethe wake-sleep learning never settles; parameters
+keep moving. But at equilibrium the TIME AVERAGE of the BP fixed points equals the
+unbelievable target exactly (their Thm 2) — even though no individual fixed point
+need be near it. Averaging beliefs over an ensemble of perturbed parameters
+reaches what no single parameter setting can. Two details matter for us: (i) a
+gaussian ensemble θ ~ N(θ̄, Σθ) works nearly as well as continued learning, and
+(ii) Σθ was consistently LOW-RANK — one or two principal components sufficed.
+
+Our detector reads surprisal off ONE forward pass at ONE parameter setting, i.e.
+one fixed point, and the F21e floor is calibrated in nats against that single
+estimate. If the estimate carries fixed-point-specific noise, averaging over a
+low-rank perturbation ensemble should tighten it.
+
+**Pre-registered (test in F23, `loop/f22_ensemble.py`):**
+
+- **H-ens-1 (separability).** Ensemble-averaged span surprisal separates planted
+  lies from genuine self-spans better than single-pass: AUROC gain >= +.02.
+- **H-ens-2 (the 19%).** At matched clean false-excision rate (<= .02), ensemble
+  scoring raises the planted-lie catch rate over single-pass by >= +.05,
+  recovering part of the ~19% of lies the q=.99 floor currently misses (F21e).
+- **H-ens-3 (low-rank suffices).** Rank r <= 8 perturbation performs within .01
+  AUROC of a much larger rank — their Σθ finding carried over.
+
+Control: sigma=0 must reproduce single-pass EXACTLY (teacher-forced scoring is
+deterministic). Any measured gain at sigma=0 is a harness bug, not a result.
+
+**AMENDMENT, before any full run (learned from F21b — check the ceiling FIRST).**
+H-ens-1 is probably near-saturated by construction and will be weak evidence
+either way: F21e already reports flag hit rate .993, i.e. the argmax picks the
+corrupt span ~99% of the time, so span-level AUROC has almost no headroom. The
+load-bearing test is **H-ens-2** — the binding constraint is the ABSOLUTE FLOOR
+(the ~19% of lies q=.99 misses), not the ranking. Report H-ens-1 for completeness;
+do not treat a null there as a verdict on the ensemble.
+
+**Harness verified 2026-07-21 (`--quick`, 6 traces, 1 seed, Qwen3-1.7B).**
+Control PASSES: sigma=0 reproduces single-pass bit-exactly (Δauroc = 0.0e+00,
+member SD = 0.0e+00). The perturbation is live at sigma=.01 (member SD = .215
+nats, i.e. members genuinely disagree). Held-out floor came out 16.09 nats
+against F21e's 16.26 — different quantile convention (per-trace max at q=.98 here
+vs per-span q=.99 there), so the agreement is a sanity check, not a match. AUROC
+pinned at 1.000 in all arms, as expected at n=6: no headroom, no information.
+Smoke test only — plumbing, not evidence.
+
+**Methodology note.** First draft calibrated the floor on the same clean traces it
+then measured the false-excision rate on, which makes that rate true by
+construction and fits the floor to the eval data. Corrected to a held-out
+calibration split (`calib_seed=7`, disjoint from eval seeds), matching F21e.
+
+**What does NOT import: eBP as a repair mechanism.** eBP assumes the true
+marginals are perpetually available during learning — supervision we do not have
+at inference. The gaussian-ensemble variant needs Σθ, which needs that supervision
+once. Take the DETECTOR idea; leave the repair as excise-and-regenerate (F20e).
+
+**F22d — Latent-MoE assessed (`~/Repositories/Latent-MoE`): the idea imports, the
+code does not.** LatentMoE (Elango et al., NVIDIA 2026, arXiv:2601.18089) is an
+untrained `nn.Module` — a drop-in MoE FFN for a model you are PRETRAINING. It
+cannot be grafted onto pretrained Qwen3-1.7B (dense) without training it, so it
+supplies nothing to the F23 experiment. But the mechanism it optimizes is exactly
+eBP's requirement: **top-k routing already IS an ensemble over parameter subsets**
+— each token is processed by a different subset of expert weights — and LatentMoE
+exists to expand that combination space (N'=αN, K'=αK). On an MoE checkpoint you
+could draw eBP ensemble members by perturbing the ROUTER (temperature, sampling
+instead of argmax top-k, dropping a slot) at zero weight-copy and near-zero memory
+cost, which is strictly cheaper than the weight perturbation F23 uses.
+
+- **H-ens-4 (router ensemble), NOT yet testable here.** Needs an MoE checkpoint
+  that fits 12 GB. Qwen3-30B-A3B does not (~60 GB bf16). OLMoE-1B-7B (~7B total)
+  is the plausible candidate, likely 8-bit. Deferred, not rejected.
+
 ## F21 — Phase 3 (closed loop on FREE generation): the loop WORKS; the
 ## trigger policy does not (2026-07-19; Qwen3-1.7B, n=60 x 3 seeds).
 
