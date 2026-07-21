@@ -1,5 +1,87 @@
 # source-monitor — findings log
 
+## F23 — Ensemble-surprisal RESULTS: H-ens-2 passes, but sigma (not member
+## count) does the work — the eBP framing is only weakly supported
+## (2026-07-21; Qwen3-1.7B, entity_prose, 60 traces x 3 seeds, GPU).
+
+    arm            auroc    Δauroc   catch   Δcatch  cleanFP  memberSD  wall
+    single         0.9768   +0.0000  0.733   +0.000  0.000    0.0000     24s
+    control-k4-s0  0.9768   +0.0000  0.733   +0.000  0.000    0.0000    104s
+    k4-s0.005      0.9771   +0.0003  0.739   +0.006  0.000    0.098     249s
+    k4-s0.01       0.9770   +0.0002  0.767   +0.033  0.006    0.171     248s
+    k4-s0.02       0.9775   +0.0007  0.767   +0.033  0.006    0.308     249s
+    k4-s0.05       0.9822   +0.0054  0.828   +0.094  0.017    0.675     250s
+    k8-s0.01       0.9776   +0.0008  0.750   +0.017  0.000    0.193     499s
+    k8-s0.02       0.9785   +0.0017  0.767   +0.033  0.006    0.357     499s
+    k4-s0.02-r64   0.9762   -0.0005  0.728   -0.006  0.000    0.329     256s
+
+    GATE: control PASS · H-ens-1 FAIL (+.0054<.02) · H-ens-2 PASS
+          (+.094 @ cleanFP .017) · H-ens-3 PASS (|Δ|rank8-64 = .0013)
+
+**F23a — The headline is true but thin: the ensemble DOES recover missed lies
+(H-ens-2 PASS).** Best arm k4-s0.05 lifts catch .733 -> .828 (+.094, clears the
++.05 bar) while clean false-excision stays .017 (<= the .02 ceiling), and AUROC
+rises +.0054 — a THRESHOLD-FREE confirmation that separability genuinely improved,
+not merely a floor shift. In absolute terms it recovers ~9.5 of the ~26.7 points
+the single-pass floor was missing (~1/3 of the gap). Real, cheap, modest.
+
+**F23b — H-ens-1 FAILS exactly as pre-registered (F22 amendment was right).**
+Best Δauroc +.0054 vs a +.02 bar. Baseline AUROC is already .977 (F21e flag hit
+.993) — there is almost no ranking headroom, so a null here was expected and is
+not evidence against the method. The load-bearing axis was always the absolute
+floor (H-ens-2), and that is where the gain showed up.
+
+**F23c — THE HONEST FINDING: perturbation MAGNITUDE (sigma), not member count
+(k), is the active ingredient — which partly UNDERCUTS the eBP framing that
+motivated the test.** eBP's mechanism is variance-reduction-by-averaging: more
+members -> tighter estimate. The data show member count doing almost nothing and
+sigma doing everything:
+
+- k does the eBP-predicted thing, but WEAKLY: k4->k8 improves AUROC by ~+.001
+  (s0.01: .9770->.9776; s0.02: .9775->.9785) and does NOT improve catch (s0.01:
+  .767->.750, worse). Consistent with mild variance reduction, an order of
+  magnitude too small to matter.
+- sigma does everything: the +.05 bar is cleared ONLY at s0.05, and the AUROC
+  and catch both scale monotonically with sigma, not k.
+
+So the effect is mostly "a large low-rank weight perturbation stresses fluent
+clean spans more than already-surprising lie spans, widening the gap," NOT
+"averaging over an ensemble recovers the true marginal." That is a DIFFERENT
+mechanism from the one Pitkow motivated. H-ens-2 passing is not eBP vindication.
+
+**F23d — The confound to resolve next (owed before any strong claim): is the
+winner an ENSEMBLE effect or a single-perturbed-pass effect?** Every sigma-sweep
+point used k=4; the winner s0.05 was tested ONLY at k=4; and the one clean k
+comparison (s0.01/s0.02) shows k nearly inert. Strong implication: **k=1 at
+s0.05 likely captures most of the +.094 at 1/4 the cost.** If it does, "ensemble"
+collapses to "score once under a big perturbation" — cheaper, and decisively
+non-eBP. `f22_ensemble.py` needs a k1-s0.05 arm (and k2/k4/k8 at s0.05 to see if
+averaging adds anything at the operating sigma). Until then, do not describe F23
+as an ensemble result; describe it as a perturbation result.
+
+**F23e — H-ens-3 PASS: low rank suffices (this part IS Pitkow-consistent).** At
+s0.02, rank-64 matched rank-8 to |Δauroc|=.0013 — and was in fact marginally
+worse on catch (.728 vs .767). Their Σθ-is-low-rank finding carries: no reason to
+pay for high-rank perturbations.
+
+**F23f — Harness integrity held on the real model.** control-k4-s0 reproduced
+single-pass to 4 decimals with member SD exactly 0.0 (sigma=0 is a true no-op),
+so every non-zero delta above is signal, not plumbing. The rank-64 arm going
+slightly NEGATIVE (-.0005 auroc, -.006 catch) is a useful reality check: the
+pipeline is not rigged to manufacture gains.
+
+**Caveats.** (1) s0.05 is a LARGE perturbation (~5% Frobenius/layer) — the
+"member" is a substantially degraded model, straining the eBP analogy; acceptable
+only because we SCORE, never generate, from it. (2) cleanFP .017 sits close to the
+.02 ceiling and the s0.05 floor dropped far (18.90 -> 13.45), so the operating
+point is sensitive; AUROC (+.0054) is the trustworthy number, and it is modest.
+(3) Numbers are 3-seed means; per-seed spread not yet inspected. (4) Cost: perturbed
+arms ran ~250s (k4) / ~500s (k8) vs 24s single — the forward-hook overhead (196
+callbacks/pass) is real; a k1-s0.05 confirmation would also be the performant path.
+
+Run: `python -m source_monitor.llm.loop.f22_ensemble`; raw in
+`results/llm_f23_ensemble_results.jsonl`, log in `results/f23_sweep.log`.
+
 ## F22 — Unbelievable marginals: a theoretical account of F20a, and a
 ## pre-registered ensemble test (2026-07-21). THEORY + DESIGN — NO RESULTS YET.
 

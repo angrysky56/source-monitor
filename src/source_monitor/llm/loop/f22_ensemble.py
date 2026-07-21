@@ -171,6 +171,10 @@ def main() -> None:
     ap.add_argument("--model", default=None)
     ap.add_argument("--target-fpr", type=float, default=0.02)
     ap.add_argument("--results-dir", default=None)
+    ap.add_argument("--confound", action="store_true",
+                    help="F23d: hold sigma=0.05, sweep k in {1,2,4,8} to test "
+                         "whether the F23 win is ENSEMBLE-averaging or a single "
+                         "perturbed pass. k1==single-perturbed isolates it.")
     args = ap.parse_args()
 
     cfg = Phase3Config()
@@ -181,20 +185,31 @@ def main() -> None:
     calib_n = 8 if args.quick else cfg.calib_n
     results_dir = args.results_dir or cfg.results_dir
 
-    arms = [
-        Arm("single", k=1, sigma=0.0),
-        Arm("control-k4-s0", k=4, sigma=0.0),  # must equal single: harness check
-        Arm("k4-s0.01", k=4, sigma=0.01),
-    ]
-    if not args.quick:
-        arms += [
-            Arm("k4-s0.005", k=4, sigma=0.005),
-            Arm("k4-s0.02", k=4, sigma=0.02),
+    if args.confound:
+        # F23d: sigma fixed at the winning 0.05, k varied. If k1 ≈ k8, the F23
+        # gain is the PERTURBATION, not the ensemble, and the eBP framing drops.
+        arms = [
+            Arm("single", k=1, sigma=0.0),  # baseline anchor for the deltas
+            Arm("k1-s0.05", k=1, sigma=0.05),
+            Arm("k2-s0.05", k=2, sigma=0.05),
             Arm("k4-s0.05", k=4, sigma=0.05),
-            Arm("k8-s0.01", k=8, sigma=0.01),
-            Arm("k8-s0.02", k=8, sigma=0.02),
-            Arm("k4-s0.02-r64", k=4, sigma=0.02, rank=64),  # H-ens-3
+            Arm("k8-s0.05", k=8, sigma=0.05),
         ]
+    else:
+        arms = [
+            Arm("single", k=1, sigma=0.0),
+            Arm("control-k4-s0", k=4, sigma=0.0),  # must equal single: harness check
+            Arm("k4-s0.01", k=4, sigma=0.01),
+        ]
+        if not args.quick:
+            arms += [
+                Arm("k4-s0.005", k=4, sigma=0.005),
+                Arm("k4-s0.02", k=4, sigma=0.02),
+                Arm("k4-s0.05", k=4, sigma=0.05),
+                Arm("k8-s0.01", k=8, sigma=0.01),
+                Arm("k8-s0.02", k=8, sigma=0.02),
+                Arm("k4-s0.02-r64", k=4, sigma=0.02, rank=64),  # H-ens-3
+            ]
 
     os.makedirs(results_dir, exist_ok=True)
     out_file = Path(results_dir) / "llm_f23_ensemble_results.jsonl"
