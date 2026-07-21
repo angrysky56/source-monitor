@@ -130,12 +130,60 @@ was logprob FIDELITY under quantization (the floor is calibrated in nats). The
 actual blocker is one level upstream — the logprobs are not exposed at all.
 Fidelity remains untested because it is unreachable from here.
 
-**The GGUF path is still open, just not through Unsloth.** The weights are already
-in the HF cache (`models--unsloth--Qwen-AgentWorld-35B-A3B-GGUF`).
-`llama-cpp-python` with `logits_all=True` (or `create_completion(echo=True,
-logprobs=N)`) does return prompt-token logprobs. Not installed in either venv —
-needs `uv pip install llama-cpp-python` before the quantization-calibration test
-can run.
+**The GGUF path is open through llama-cpp-python — now VERIFIED, not asserted.**
+The weights are already in the HF cache
+(`models--unsloth--Qwen-AgentWorld-35B-A3B-GGUF`). `llama-cpp-python` 0.3.34 is
+installed in the source-monitor venv, and `scripts/verify_gguf_logprobs.py`
+confirms per-token logprobs for SUPPLIED text on a tiny CPU GGUF (stories260K),
+by two independent paths:
+
+- `create_completion(echo=True, logprobs=N)` returns one `token_logprob` per
+  PROMPT token (first is `None` — nothing predicts it), i.e. the OpenAI-style
+  surface that llama-server drops but the wrapper honours.
+- `logits_all=True` + low-level `eval` gives the exact neg-logprob of an
+  arbitrary supplied span — the direct analogue of `telemetry`'s teacher-forced
+  scoring.
+
+User-confirmed mechanism (matches the observed behaviour): llama-server skips
+copying prompt-token logits to host during the parallel prefill for speed; the
+Python wrapper forces per-token evaluation, so the logits survive. So the F22e
+blocker is Unsloth's *server*, not GGUF. The quantization-fidelity question (does
+the nats-calibrated floor survive Q4_K_XL noise?) is now actually runnable — it
+needs a `telemetry`-parity GGUF scorer over `entity_prose`, on GPU with fans.
+
+**F22f — optillm assessed (`~/Repositories/optillm`): same shape as SEER, opposite
+goal; import the signals, not the server.** optillm is an OpenAI-compatible
+inference-time-compute proxy (20+ methods: moa, mcts, best-of-n, plansearch,
+rstar, self-consistency, cot_decoding, entropy_decoding). Architecturally it is
+exactly SEER's shape — a loop around a frozen model — but its objective is the
+mirror image: it spends inference compute to produce a BETTER answer, whereas
+source-monitor spends it to CATCH a wrong one. That difference decides what is
+worth taking.
+
+- **Does NOT import: the scoring surface.** optillm's local `calculate_logprobs`
+  (inference.py) is teacher-forced HF next-token logprob extraction — the same
+  operation as `telemetry.retrospective_surprisal`, minus the span/slot
+  provenance. It adds nothing to the detector and, being HF-only, does nothing
+  for GGUF (for GGUF backends optillm proxies to an OpenAI endpoint and inherits
+  the very echo/prompt-logprob limitation F22e hit). The 20+ accuracy methods are
+  orthogonal to detection.
+- **Imports: two candidate detector signals, complementary to surprisal.**
+  (1) cot_decoding's confidence Δ = mean over answer tokens of (p_top1 − p_top2)
+  — a MARGIN signal, not a neg-logprob; low margin = model torn. (2)
+  entropy_decoding's entropy/varentropy (entropix-style). Both are cheap
+  per-token quantities already computed in the forward pass. Worth trying as
+  extra features once the detector is more than a single scalar.
+- **Imports: a template for the CoT-monitor thread.** cot_decode branches over
+  the top-k FIRST tokens, greedily decodes each path, scores each by answer
+  confidence, and keeps/aggregates. That branch-score-select structure is
+  literally the "score reasoning steps, excise the faulty one, re-reason"
+  architecture parked as the next-strongest SEER application. optillm is a
+  working reference for it.
+- **Caveat — do not naively swap Δ in for surprisal.** cot_decoding's Δ is
+  measured on tokens it GENERATES, not retrospectively on a claim already in the
+  context. Using it to monitor an emitted span means re-generating that span,
+  which changes what is being measured. Δ is a generation-time signal;
+  retrospective surprisal is a scoring-time one. They are not interchangeable.
 
 **And it does NOT unlock H-ens-4, despite being an MoE.** 35B-A3B is the right
 shape, but router perturbation needs per-expert routing control in Python, which
