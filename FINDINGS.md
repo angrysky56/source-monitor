@@ -1,5 +1,137 @@
 # source-monitor — findings log
 
+## F25 — Hard-task setup for the dispersion axis: single-pass CEILINGS on
+## in-context-verifiable tasks (short AND long ξ), so the murmuration axis has no
+## headroom to exploit. The tasks with headroom are factual — where surprisal is
+## the wrong tool (F19d). (2026-07-21; infra + headroom probe, Qwen3-1.7B.)
+
+Built the hard task F24d asked for:
+- `arithmetic.generate` gains `corrupt_mid`: plants a SUBTLE off-by-(1..3) wrong
+  running total in a non-first emission; the final claim stays correct; mid
+  emissions always carry location_text so planted/clean score identically.
+  `corrupt_mid=False` is byte-unchanged (F19 arithmetic results safe).
+- `paraphrase.py` generalized: per-task `rerender_fn`; `rerender_arithmetic`
+  rewords the running-total FRAMES (RT_POOL), holding the numbers. entity_prose
+  behaviour identical (`rerender` alias).
+- `f24_murmuration --task {entity_prose,arithmetic}` and `--n-ops` (chain length /
+  difficulty). 13 CPU tests (8 entity + 5 arithmetic) pass; identity control exact.
+
+**F25a — the hard task is not hard for single-pass (headroom probe: arithmetic
+n_ops=9, off-by-small corruption, n=30, seed 42).** single-pass AUROC .992, catch
+1.000. Even a long-ξ running total with a SUBTLE ±(1..3) mid error is caught
+essentially perfectly — Qwen3-1.7B reads the in-context inconsistency directly.
+Same ceiling as entity_prose (F24), for the same reason. My "long-ξ gives
+headroom" hypothesis (F24d) is empirically FALSE for this model/task.
+
+**F25b — the reframe (the real finding): surprisal ceilings whenever the lie is an
+in-context INCONSISTENCY — which is every synthetic task in this repo.** A
+teacher-forced score reads the contradiction between the claim and its context
+tokens directly, so there is almost nothing left for ensembling (F23) or
+dispersion (F24) to add — no headroom by construction. F23's +.094 and F24's
+H-mur-1 were real but SMALL precisely because the single-pass baseline is already
+near-ceiling.
+
+**F25c — where headroom actually lives: errors NOT contradicted by context.** A
+factual hallucination (no in-context ground truth) or a self-consistent reasoning
+slip is exactly where single-pass surprisal is weak — and that is the regime F19d
+already routed to RETRIEVAL, not surprisal. So the dispersion axis can only add
+value where surprisal is the wrong detector anyway. Blunt version: on
+context-verifiable tasks the murmuration idea is a solution without a problem;
+single-pass surprisal already wins.
+
+**Consequence for seer.** The monitor's surprisal leg is near-perfect for
+context-contradicted errors and needs NO ensemble/dispersion booster there. F23's
+--confound and any further murmuration sweeps on entity/arithmetic would be
+polishing a ceiling. Effort belongs on the OTHER leg — factual claims -> retrieval
+(F19d) — and, only if the dispersion axis is worth testing at all, on a task with
+genuine model UNCERTAINTY: uncomputable arithmetic (large products the model
+cannot verify), multi-object working-memory overload, or free-form reasoning.
+
+Files: `ood/arithmetic.py` (corrupt_mid), `loop/paraphrase.py` (pluggable),
+`loop/f24_murmuration.py` (--task/--n-ops), `tests/test_paraphrase.py` (13 tests).
+No results jsonl kept — F25a is a probe, its numbers live here.
+
+## F24 — "murmuration of a claim": paraphrase-family scoring. Dispersion carries
+## real signal (H-mur-1 PASS) but is largely redundant with the mean at this
+## ceiling (H-mur-2 FAIL, as pre-registered) (2026-07-21; Qwen3-1.7B, 30x2, k=6).
+
+    detector    auroc    catch   Δ vs single   cleanFP
+    single      0.9950   0.900   +0.000        0.017
+    fam_mean    0.9977   0.950   +0.050        0.033
+    fam_std     0.7076   0.033   -0.867        0.050
+    fam_c0.5    0.9973   0.967   +0.067        0.033
+    fam_c1.0    0.9964   0.967   +0.067        0.033
+
+    GATE: control PASS · H-mur-1 PASS (AUROC fam_std .708 >= .60) ·
+          H-mur-2 FAIL (best +.067 over single OK, but +.017 over fam_mean < .02)
+
+Idea (the F22/F23 dual-representation arc, made testable): a hallucination is a
+fragile fixed point — locally plausible but not robustly supported — so its
+surprisal should be UNSTABLE when you reword its support, while a grounded claim
+stays stable. Score each span across a faithful paraphrase family (reword the
+assistant's acks, hold facts + the scored span + user instructions), and read the
+family MEAN and STD. Where F23 perturbed weights, F24 perturbs phrasing.
+
+**F24a — the idea has real substance (H-mur-1 PASS).** Dispersion alone separates
+lies from clean spans at AUROC .708 — well above chance. Lies genuinely are more
+unstable when their support is reworded, exactly the dual-representation
+prediction. The phenomenon is real and measurable. (fam_std's catch is .033
+because as a STANDALONE trigger its argmax/floor don't isolate the lie; AUROC is
+the right measure of "carries signal," and .708 is a true positive.)
+
+**F24b — looking at the family beats looking at the instance.** fam_mean
+(paraphrase-averaged surprisal) lifts catch .900 -> .950 over single-pass, and
+mean+σ reaches .967 (+.067). Same shape as F23: the aggregate over a family is a
+better detector than the single instance. The murmuration framing produces a real
+gain.
+
+**F24c — THE HONEST FINDING (pre-registered): the gain is the MEAN, not the
+dispersion.** Almost all of it (+.050 of +.067) is paraphrase-AVERAGING; the
+instability term adds only +.017 over the mean, under the +.02 bar. Dispersion is
+largely redundant with surprisal — a surprising span is also an unstable one. I
+flagged this exact risk in F22 before running. The strong claim — that
+paraphrase-instability is a DISTINCT detector axis beyond surprisal — is NOT
+established.
+
+**F24d — and it is a CEILING / POWER problem, not a clean refutation (F21b,
+again).** Single-pass is already AUROC .995 / catch .900 here — ~.05 of total
+headroom. The +.02-over-mean bar lives inside sampling noise: at n=60 one trace =
+.017 catch, so fam_mean (.950) vs mean+σ (.967) differ by ONE trace. The marginal
+value of dispersion is statistically indistinguishable from zero on this task —
+not because it is absent, but because the task is too easy to resolve it. The
+clean test of the dispersion axis needs a HARDER task with real single-pass
+headroom (long-ξ arithmetic; factual-retrieval), at F23 scale (60x3).
+
+**F24e — structural blind spot of the dispersion signal.** A FIRST-position lie
+has no prior support to reword, so its family std is 0 by construction (debug:
+lead-off lie std .00 while its mean stayed 25.4). Dispersion is blind to lead-off
+lies; the mean must carry them. Any σ-based detector needs the mean as a floor —
+which is another reason mean+σ, not σ alone, is the only sensible form.
+
+**F24f — harness integrity + the bug the scaffolding caught.** Identity family is
+an EXACT no-op (max std 0, max|mean-single| 0). Mid-build, the smoke run inverted
+(family AUROC .31): an early rerender re-derived each user instruction's location
+from the FOLLOWING ack — but for a corrupted ack that is the planted WRONG
+location, so it rewrote the instruction to agree with the lie and collapsed the
+lie's surprisal 25.4 -> 0.0. Caught by dumping raw per-span values before trusting
+the aggregate. Fixed by rewording assistant acks only, holding instructions
+byte-identical. Recorded so the trap is not re-dug.
+
+**Caveats.** (1) cleanFP not perfectly matched — fam .033 vs single .017 (n=20
+calib floor noise) — inflates the catch delta somewhat. (2) n=30x2: catch
+resolution ~.033/trace; treat sub-.03 deltas as noise. (3) family rewords ACKS
+only (instructions held for faithfulness); a richer faithful family (instruction
+paraphrase, or model-generated) might surface more dispersion — an under-powered
+perturbation is not excluded (cf F20d). (4) k=6 against a 7-template pool → members
+repeat, understating dispersion.
+
+**Verdict.** The dual-representation idea earned a real but modest confirmation
+(dispersion carries signal; family > instance). The practical detector gain is
+mostly variance-reduction-by-averaging, not a new axis. The load-bearing "distinct
+new signal" claim is UNRESOLVED, gated by task ceiling — the honest next move is a
+harder task with headroom, not a bigger claim. Files: `loop/paraphrase.py`,
+`loop/f24_murmuration.py`, `tests/test_paraphrase.py` (8 CPU tests).
+
 ## F23 — Ensemble-surprisal RESULTS: H-ens-2 passes, but sigma (not member
 ## count) does the work — the eBP framing is only weakly supported
 ## (2026-07-21; Qwen3-1.7B, entity_prose, 60 traces x 3 seeds, GPU).
