@@ -1,8 +1,9 @@
 # source-monitor — findings log
 
-## F27 — Build A: the router mechanism built, tested, & validated (2026-07-23; Qwen3-1.7B,
-## entity_prose + factual_qa, n=60, k=6, seed 42). Content-only classification
-## enforces clean separation without oracle cheats.
+## F27 — Build A: the router MECHANISM built, tested & validated (controls pass,
+## oracle-leak-free); its demonstrated value is false-flag reduction + efficiency,
+## NOT an AUROC win — that is owed to Build B. (2026-07-23; Qwen3-1.7B,
+## entity_prose + factual_qa, n=60, k=6, SINGLE seed 42.)
 
 Architecture context: Combines Leg 1 (retrospective surprisal; context-derivable errors)
 and Leg 2 (sampled consistency; factual recall/confabulation).
@@ -14,8 +15,8 @@ Key Results & Constraints Verification:
 - **Content-Only Classifier (`is_context_derivable`):** Uses word-boundary matching on user/assistant dialogue turns (excluding system instructions and negation candidates). Zero metadata (`trace.meta["grounded"]`) inspection.
 - **Track 1 (All-Derivable Control - `entity_prose`, n=60):** 100.0% classified content-derivable -> 100.0% routed to Leg 1 (surprisal). Identity Control Match (Router == Leg 1): **100.0%** (PASS).
 - **Track 2 (All-Factual Control - `factual_qa`, n=60):** 91.7% (55/60) classified content-underivable -> 91.7% routed to Leg 2 (consistency). Audit of all 5 boundary traces (Indices [11, 12, 22, 48, 57]) confirmed that each prompt literally contained the answer in its few-shot context (e.g. `'...symbol for sodium? Na. ... symbol for sodium?'`), so the classifier's `derivable=True` decision was **100% empirically accurate**.
-- **Track 3 (Full Multi-Seed Mixed Eval - Planted Lies, 144 traces: 102 clean, 42 corrupt):**
-  - **Routed Monitor AUROC:** **0.910** (Leg 1 AUROC: 0.765 | Leg 2 AUROC: 0.894). Meets pre-registration bar (Routed >= max(Leg1, Leg2)).
+- **Track 3 (Mixed Eval — SINGLE seed 42, 144 traces: 102 clean, 42 corrupt; multi-seed 42/137/2024 still owed):**
+  - **Routed Monitor AUROC:** **0.910** (Leg 1 AUROC: 0.765 | Leg 2 AUROC: 0.894). The routed–vs–Leg-2 gap (0.910 vs 0.894 = +0.016) is WITHIN single-seed noise (AUROC SE ~±0.05 at 42 pos / 102 neg), so the pre-registration bar (routed ≥ max(legs)) is nominally met but NOT robustly — read this as **routed ≈ Leg-2 quality**, not an AUROC win. The robust results are the false-flag cut and efficiency (below); a genuine AUROC win requires Build B (caveat 2).
   - **Catch Rates & False Flags:**
     - **Routed:** **92.9%** Catch | **10.8%** False-Flag Rate.
     - **Leg 1 Only:** 100.0% Catch | **47.1%** False-Flag Rate (uncalibrated scale mismatch on factual data).
