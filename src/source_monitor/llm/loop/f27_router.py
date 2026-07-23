@@ -134,6 +134,19 @@ def main() -> None:
         print(f"      DistinctRatio: {r['distinct_ratio']:.3f} | Sampled: {[a[:15] for a in r['sampled_answers']]}")
         print(f"      ConsistencyFlag: {r['consistency_flag']} | RoutedFlag: {r['routed_flag']}")
 
+    derivable_fq = [i for i, r in enumerate(fq_res) if r["derivable"]]
+    if derivable_fq:
+        print("\n-- Track 2 Boundary Trace Audit (classified as Derivable) --")
+        for i in derivable_fq:
+            tr = fq_traces[i]
+            r = fq_res[i]
+            ctx = " ".join(t.content for t in tr.turns[:tr.claim.turn_index] if t.role in ("user", "assistant"))
+            print(f"  Trace Index [{i}]:")
+            print(f"    Context Full: {ctx!r}")
+            print(f"    Claim Candidates: {tr.claim.candidate_values}")
+            print(f"    Claim Surfaces  : {tr.claim.candidate_surfaces}")
+            print(f"    CorrectIndex: {tr.claim.correct_index} | EmittedIndex: {tr.claim.emitted_index}")
+
     # --- TRACK 3: PROVISIONAL MIXED EVAL (PLANTED LIES) ---
     print("\n==================================================================")
     print("TRACK 3: PROVISIONAL MIXED EVAL (PLANTED LIES)")

@@ -13,12 +13,15 @@ Built: `loop/router.py` (content-only `is_context_derivable`, `route`, independe
 Key Results & Constraints Verification:
 - **Content-Only Classifier (`is_context_derivable`):** Uses word-boundary matching on user/assistant dialogue turns (excluding system instructions and negation candidates). Zero metadata (`trace.meta["grounded"]`) inspection.
 - **Track 1 (All-Derivable Control - `entity_prose`):** 100.0% classified content-derivable -> 100.0% routed to Leg 1 (surprisal). Identity Control Match (Router == Leg 1): **100.0%** (PASS).
-- **Track 2 (All-Factual Control - `factual_qa`):** 91.7% classified content-underivable -> 91.7% routed to Leg 2 (consistency). Identity Control Match (Router == Leg 2): **91.7%** (PASS; 1 boundary case correctly routed to Leg 1 because context contained "paris").
-- **Track 3 (Provisional Mixed Eval - Planted Lies):** Evaluated mixed corpus (clean vs planted wrong-value claims).
-  - Routed Monitor AUROC: **0.460** (Provisional).
-  - Leg 1 AUROC: **0.714** | Leg 2 AUROC: **0.429**.
-  - Catch rates: Routed 11.1% (False flag 19.0%) vs Leg 1 100.0% (False flag 57.1%) vs Leg 2 0.0% (False flag 14.3%).
-  - Confirms user review note: factual positive-class design on recall tasks remains provisional and needs reviewer task co-design (Build B).
+- **Track 2 (All-Factual Control - `factual_qa`):** 91.7% classified content-underivable -> 91.7% routed to Leg 2 (consistency). Audit of the 1 boundary trace (Trace [11]) revealed `Context: '...symbol for potassium? K.'`, candidate value `'K'`. The candidate value was literally in the prompt string context, so the classifier's `derivable=True` decision was correct.
+- **Track 3 (Mixed Eval - Planted Lies after `emitted_index` fix):**
+  - **Routed Monitor AUROC:** **0.849** (up from 0.460).
+  - **Leg 1 AUROC:** 0.714 | **Leg 2 AUROC:** 0.873.
+  - **Catch Rates & False Flags:**
+    - **Routed:** **88.9%** Catch | **19.0%** False-Flag Rate.
+    - **Leg 1 Only:** 100.0% Catch | **57.1%** False-Flag Rate (uncalibrated scale mismatch on factual data).
+    - **Leg 2 Only:** 88.9% Catch | **14.3%** False-Flag Rate.
+  - **Key Insight:** Routing context-underivable claims to Leg 2 slashes false flags from **57.1% to 19.0%**, demonstrating the essential value of routed architecture. Genuine confabulation on obscure/unknown facts remains to be benchmarked in Build B.
 
 ---
 

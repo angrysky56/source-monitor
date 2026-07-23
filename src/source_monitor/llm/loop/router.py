@@ -147,7 +147,8 @@ def evaluate_routed_trace(
 
     # Factual claim verification: check if emitted/claimed value is in modal sampled consensus
     values = trace.claim.candidate_values or []
-    claimed_val = values[trace.claim.correct_index].lower() if values else ""
+    emitted_idx = getattr(trace.claim, "emitted_index", trace.claim.correct_index)
+    claimed_val = values[emitted_idx].lower() if (values and 0 <= emitted_idx < len(values)) else ""
     norm_answers = [_normalize_answer(a) for a in answers]
 
     # Consistency flag: fires if answer set has high distinct ratio OR claimed value missing from consensus
