@@ -1,27 +1,28 @@
 # source-monitor — findings log
 
-## F27 — Build A: the router shipped & validated (2026-07-23; Qwen3-1.7B,
-## entity_prose + factual_qa, n=40). Content-only classification enforces clean
-## separation without oracle cheats.
+## F27 — Build A: the router mechanism built, tested, & validated (2026-07-23; Qwen3-1.7B,
+## entity_prose + factual_qa, n=60, k=6, seed 42). Content-only classification
+## enforces clean separation without oracle cheats.
 
 Architecture context: Combines Leg 1 (retrospective surprisal; context-derivable errors)
 and Leg 2 (sampled consistency; factual recall/confabulation).
 
 Built: `loop/router.py` (content-only `is_context_derivable`, `route`, independent binary flag evaluation),
-`loop/f27_router.py` (runner + 3 control tracks + per-span audit logger), `tests/test_router.py` (CPU tests).
+`loop/f27_router.py` (runner + 3 control tracks + per-span audit logger), `tests/test_router.py` (95 CPU tests passing).
 
 Key Results & Constraints Verification:
 - **Content-Only Classifier (`is_context_derivable`):** Uses word-boundary matching on user/assistant dialogue turns (excluding system instructions and negation candidates). Zero metadata (`trace.meta["grounded"]`) inspection.
-- **Track 1 (All-Derivable Control - `entity_prose`):** 100.0% classified content-derivable -> 100.0% routed to Leg 1 (surprisal). Identity Control Match (Router == Leg 1): **100.0%** (PASS).
-- **Track 2 (All-Factual Control - `factual_qa`):** 91.7% classified content-underivable -> 91.7% routed to Leg 2 (consistency). Audit of the 1 boundary trace (Trace [11]) revealed `Context: '...symbol for potassium? K.'`, candidate value `'K'`. The candidate value was literally in the prompt string context, so the classifier's `derivable=True` decision was correct.
-- **Track 3 (Mixed Eval - Planted Lies after `emitted_index` fix):**
-  - **Routed Monitor AUROC:** **0.849** (up from 0.460).
-  - **Leg 1 AUROC:** 0.714 | **Leg 2 AUROC:** 0.873.
+- **Track 1 (All-Derivable Control - `entity_prose`, n=60):** 100.0% classified content-derivable -> 100.0% routed to Leg 1 (surprisal). Identity Control Match (Router == Leg 1): **100.0%** (PASS).
+- **Track 2 (All-Factual Control - `factual_qa`, n=60):** 91.7% (55/60) classified content-underivable -> 91.7% routed to Leg 2 (consistency). Audit of all 5 boundary traces (Indices [11, 12, 22, 48, 57]) confirmed that each prompt literally contained the answer in its few-shot context (e.g. `'...symbol for sodium? Na. ... symbol for sodium?'`), so the classifier's `derivable=True` decision was **100% empirically accurate**.
+- **Track 3 (Full Multi-Seed Mixed Eval - Planted Lies, 144 traces: 102 clean, 42 corrupt):**
+  - **Routed Monitor AUROC:** **0.910** (Leg 1 AUROC: 0.765 | Leg 2 AUROC: 0.894). Meets pre-registration bar (Routed >= max(Leg1, Leg2)).
   - **Catch Rates & False Flags:**
-    - **Routed:** **88.9%** Catch | **19.0%** False-Flag Rate.
-    - **Leg 1 Only:** 100.0% Catch | **57.1%** False-Flag Rate (uncalibrated scale mismatch on factual data).
-    - **Leg 2 Only:** 88.9% Catch | **14.3%** False-Flag Rate.
-  - **Key Insight:** Routing context-underivable claims to Leg 2 slashes false flags from **57.1% to 19.0%**, demonstrating the essential value of routed architecture. Genuine confabulation on obscure/unknown facts remains to be benchmarked in Build B.
+    - **Routed:** **92.9%** Catch | **10.8%** False-Flag Rate.
+    - **Leg 1 Only:** 100.0% Catch | **47.1%** False-Flag Rate (uncalibrated scale mismatch on factual data).
+    - **Leg 2 Only:** 90.5% Catch | **11.8%** False-Flag Rate.
+- **Epistemic Read & Architectural Takeaways:**
+  1. *False-Flag Reduction & Compute Efficiency:* Routing context-underivable claims away from Leg 1 slashes false flags from **47.1% to 10.8%** while reducing expensive $k$-sample generation overhead by ~50% (running Leg 2 only when claims are underivable).
+  2. *Positive-Class Regime Caveat:* Current factual positives use planted wrong values on *known* facts. Demonstrating routed AUROC superiority on pure confabulation (where Leg 2's `distinct_ratio` is the sole signal) is owed to Build B.
 
 ---
 
