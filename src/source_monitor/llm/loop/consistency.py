@@ -26,12 +26,14 @@ harder.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter
 from dataclasses import replace
 from typing import Any
 
 import torch
 
+from source_monitor.llm.loop.monitor import THINK_OFF, strip_think
 from source_monitor.llm.ood.base import make_variant, raw_claim_score
 
 # Meaning-preserving question frames; QFRAMES[0] is the identity (control).
@@ -130,4 +132,85 @@ def answer_stability(
         "modal_is_value": bool(surfaces and surfaces[modal] == "value"),
         "modal_correct": modal == trace.claim.correct_index,
         "prefs": prefs,
+    }
+
+
+# --- F26c: the DISCRETE instrument — sampled generation, not teacher forcing ---- #
+# Teacher-forced preference reads the prior and is invariant to smooth paraphrase
+# (F26b, AUROC .500). The signal that reveals knowledge is SAMPLING VARIANCE: draw
+# independent generations and ask whether the answer holds its shape. A known fact
+# is generated consistently; a confabulation varies.
+
+_NON_ALNUM = re.compile(r"[^a-z0-9 ]+")
+_HEDGES = (
+    "no reliable record", "no record", "not sure", "cannot", "can't", "do not know",
+    "don't know", "not known", "unknown", "unable", "no idea", "not certain",
+)
+
+
+def _normalize_answer(text: str) -> str:
+    """First line, lowercased, punctuation-stripped, leading filler removed."""
+    stripped = text.strip()
+    line = stripped.splitlines()[0].lower().strip() if stripped else ""
+    line = _NON_ALNUM.sub("", line).strip()
+    for pre in ("the ", "a ", "an ", "it is ", "its ", "that is ", "answer is "):
+        if line.startswith(pre):
+            line = line[len(pre):]
+    return line.strip()
+
+
+def _is_hedge(text: str) -> bool:
+    t = text.lower()
+    return any(h in t for h in _HEDGES)
+
+
+@torch.no_grad()
+def sample_answers(
+    model: Any, tok: Any, trace: Any, device: str,
+    k: int = 5, temperature: float = 0.8, max_new_tokens: int = 24, seed: int = 0,
+) -> list[str]:
+    """Draw k independent free-text answers to the trace's question (thinking off)."""
+    ci = trace.claim.turn_index
+    msgs = [{"role": t.role, "content": t.content} for t in trace.turns[:ci]]
+    text = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True) + THINK_OFF
+    enc = tok(text, return_tensors="pt").to(device)
+    n_prompt = enc["input_ids"].shape[1]
+    pad = getattr(tok, "pad_token_id", None) or getattr(tok, "eos_token_id", 0)
+    out: list[str] = []
+    for j in range(k):
+        torch.manual_seed(seed * 1000 + j)
+        gen = model.generate(
+            **enc, do_sample=True, temperature=temperature, top_p=0.95,
+            max_new_tokens=max_new_tokens, pad_token_id=pad,
+        )
+        out.append(strip_think(tok.decode(gen[0, n_prompt:], skip_special_tokens=True)))
+    return out
+
+
+@torch.no_grad()
+def sampled_consistency(
+    model: Any, tok: Any, trace: Any, device: str,
+    k: int = 5, temperature: float = 0.8, seed: int = 0,
+) -> dict:
+    """Self-consistency of k sampled answers — the discrete-symmetry rigidity test.
+
+    Returns ``agreement`` (modal fraction; high = the answer holds its shape),
+    ``distinct_ratio`` (distinct answers / k; high = confabulation), ``hedge_rate``
+    (fraction that abstain), ``correct_rate`` (fraction containing the true value),
+    and the raw ``answers``.
+    """
+    answers = sample_answers(model, tok, trace, device, k=k, temperature=temperature, seed=seed)
+    norm = [_normalize_answer(a) for a in answers]
+    counts = Counter(norm)
+    _, cnt = counts.most_common(1)[0]
+    total = max(len(answers), 1)
+    values = trace.claim.candidate_values or []
+    true_val = values[trace.claim.correct_index].lower() if values else ""
+    return {
+        "agreement": cnt / total,
+        "distinct_ratio": len(counts) / total,
+        "hedge_rate": sum(_is_hedge(a) for a in answers) / total,
+        "correct_rate": (sum(true_val in a.lower() for a in answers) / total
+                         if true_val else float("nan")),
+        "answers": answers,
     }

@@ -5,6 +5,8 @@ from __future__ import annotations
 from source_monitor.llm.loop.consistency import (
     QFRAMES,
     _frames,
+    _is_hedge,
+    _normalize_answer,
     _question_turn_index,
     paraphrase_query,
 )
@@ -60,3 +62,21 @@ def test_candidate_machinery_survives_paraphrase() -> None:
     out = paraphrase_query(tr, "I'd like to know: {q}")
     assert out.claim.candidate_contents == tr.claim.candidate_contents
     assert out.claim.correct_index == tr.claim.correct_index
+
+
+# --- sampled instrument helpers (F26c) --------------------------------------- #
+
+def test_normalize_answer_collapses_surface_variants() -> None:
+    assert _normalize_answer("Paris.") == "paris"
+    assert _normalize_answer("The capital is Paris") == "capital is paris"
+    assert _normalize_answer("  Tokyo!\nextra line ") == "tokyo"
+    assert _normalize_answer("") == ""
+    # surface variants of the same answer collapse to one token
+    assert _normalize_answer("Au") == _normalize_answer("au.")
+
+
+def test_is_hedge_detects_abstention() -> None:
+    assert _is_hedge("I have no reliable record of that.")
+    assert _is_hedge("I don't know.")
+    assert not _is_hedge("Paris.")
+    assert not _is_hedge("The capital is Tokyo.")

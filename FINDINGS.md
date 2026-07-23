@@ -1,9 +1,9 @@
 # source-monitor — findings log
 
-## F26 — the factual leg (consistency detector): the teacher-forced instrument
-## reads the PRIOR, not knowledge, so it can't BE a consistency signal — sampling
-## is required. Scaffold built, two scoring biases caught. (2026-07-21; design +
-## viability smoke, Qwen3-1.7B, factual_qa.)
+## F26 — the factual leg (consistency detector): teacher-forced preference reads
+## the PRIOR, not knowledge (dead end); SAMPLED self-consistency DELIVERS the leg
+## (AUROC .82 vs .50). Both monitor legs now exist. (2026-07-21; Qwen3-1.7B,
+## factual_qa, n=60.)
 
 Architecture context. F25 located seer's real gap: errors NOT contradicted by
 context — factual recall, where F19 already put surprisal at ~chance. Target: the
@@ -48,10 +48,37 @@ rest of the monitor. That is a real architectural fork: legs 1 (surprisal) and 2
 agreement(known) > agreement(unanswerable) at AUROC >= .65 while min-surprisal is
 ~chance. Then wire the router (context-derivable -> leg 1; factual -> leg 2).
 
-**Honest scope.** F26 is a NEGATIVE on the teacher-forced proxy — with the two
-biases and the structural reason nailed down and the correct instrument identified.
-It is NOT a verdict on whether consistency works; that needs the sampling build.
-Files: `loop/consistency.py`, `loop/f26_consistency.py`, `tests/test_consistency.py`.
+**F26d — the sampling instrument DELIVERS (built + run: `sampled_consistency`,
+`f26_sample.py`, n=60, k=6, temp 0.8).** Drawing k independent generations and
+measuring whether the answer holds its shape separates unanswerable from known at
+AUROC **.818** (hedge_rate) / **.761** (distinct_ratio) / .760 (disagreement) —
+against teacher-forcing's .500. known: distinct .175 (6 samples ≈ 1 answer), hedge
+.000, correct 1.000; unanswerable: distinct .545, hedge .545. Both gates PASS
+(H-samp-1 .818; H-samp-2 known-correct 1.000). Answers audited, not a black box:
+"capital of Canada?" -> all 6 agree and are correct; "grains of sand on Brighton?"
+-> all 6 stably abstain. The discrete-symmetry instrument (independent draws) works
+where the continuous one (smooth paraphrase) could not — the Noether/rigidity
+framing, cashed out.
+
+Honest caveats: (1) the STRONGEST signal is hedge_rate — factual_qa's unanswerable
+set is OBVIOUSLY unanswerable (Caesar's breakfast), so the win is partly calibrated
+REFUSAL (content), not sampling variance. (2) distinct_ratio (.761) is the GENERAL
+signal — pure sampling variance, works without hedging — and it passes; that is the
+true consistency detector. (3) The dangerous case — confident CONFABULATION on
+plausible-but-unknown questions — is under-represented here; distinct_ratio is its
+signal but this task does not stress it. (4) n=60, 1 seed; firm with multi-seed and
+a harder confabulation task.
+
+**Architecture status: BOTH legs now exist.** Leg 1 (surprisal, context-derivable)
+is near-perfect (F21e/F25); leg 2 (sampled consistency, factual) is viable (here).
+The two legs use DIFFERENT instruments (teacher-forced scoring vs temperature
+sampling) — a real fork, not a nuisance. Missing piece = the ROUTER: per span,
+decide "is the answer present in context?" and dispatch to leg 1 or leg 2. That,
+plus a harder confabulation task, is the path to a functional two-leg monitor.
+
+Files: `loop/consistency.py` (teacher-forced + sampled), `loop/f26_consistency.py`
+(the negative), `loop/f26_sample.py` (the positive), `tests/test_consistency.py`
+(10 CPU tests). Raw: `results/llm_f26_sample_results.jsonl`.
 
 ## F25 — Hard-task setup for the dispersion axis: single-pass CEILINGS on
 ## in-context-verifiable tasks (short AND long ξ), so the murmuration axis has no
