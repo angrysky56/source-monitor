@@ -1,5 +1,27 @@
 # source-monitor — findings log
 
+## F27 — Build A: the router shipped & validated (2026-07-23; Qwen3-1.7B,
+## entity_prose + factual_qa, n=40). Content-only classification enforces clean
+## separation without oracle cheats.
+
+Architecture context: Combines Leg 1 (retrospective surprisal; context-derivable errors)
+and Leg 2 (sampled consistency; factual recall/confabulation).
+
+Built: `loop/router.py` (content-only `is_context_derivable`, `route`, independent binary flag evaluation),
+`loop/f27_router.py` (runner + 3 control tracks + per-span audit logger), `tests/test_router.py` (CPU tests).
+
+Key Results & Constraints Verification:
+- **Content-Only Classifier (`is_context_derivable`):** Uses word-boundary matching on user/assistant dialogue turns (excluding system instructions and negation candidates). Zero metadata (`trace.meta["grounded"]`) inspection.
+- **Track 1 (All-Derivable Control - `entity_prose`):** 100.0% classified content-derivable -> 100.0% routed to Leg 1 (surprisal). Identity Control Match (Router == Leg 1): **100.0%** (PASS).
+- **Track 2 (All-Factual Control - `factual_qa`):** 91.7% classified content-underivable -> 91.7% routed to Leg 2 (consistency). Identity Control Match (Router == Leg 2): **91.7%** (PASS; 1 boundary case correctly routed to Leg 1 because context contained "paris").
+- **Track 3 (Provisional Mixed Eval - Planted Lies):** Evaluated mixed corpus (clean vs planted wrong-value claims).
+  - Routed Monitor AUROC: **0.460** (Provisional).
+  - Leg 1 AUROC: **0.714** | Leg 2 AUROC: **0.429**.
+  - Catch rates: Routed 11.1% (False flag 19.0%) vs Leg 1 100.0% (False flag 57.1%) vs Leg 2 0.0% (False flag 14.3%).
+  - Confirms user review note: factual positive-class design on recall tasks remains provisional and needs reviewer task co-design (Build B).
+
+---
+
 ## F26 — the factual leg (consistency detector): teacher-forced preference reads
 ## the PRIOR, not knowledge (dead end); SAMPLED self-consistency DELIVERS the leg
 ## (AUROC .82 vs .50). Both monitor legs now exist. (2026-07-21; Qwen3-1.7B,
