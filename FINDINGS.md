@@ -1,5 +1,58 @@
 # source-monitor — findings log
 
+## F26 — the factual leg (consistency detector): the teacher-forced instrument
+## reads the PRIOR, not knowledge, so it can't BE a consistency signal — sampling
+## is required. Scaffold built, two scoring biases caught. (2026-07-21; design +
+## viability smoke, Qwen3-1.7B, factual_qa.)
+
+Architecture context. F25 located seer's real gap: errors NOT contradicted by
+context — factual recall, where F19 already put surprisal at ~chance. Target: the
+SECOND leg of a routed monitor — context-derivable claims -> surprisal (F21e/F25);
+factual claims -> consistency (this). Mechanism aimed at: SelfCheckGPT — a known
+fact is answered consistently, a confabulation varies.
+
+Built: `loop/consistency.py` (query-paraphrase family + preferred-value +
+answer-stability), `loop/f26_consistency.py` (viability: known vs unanswerable on
+factual_qa, grounded=False), `tests/test_consistency.py` (6 CPU tests). Reuses
+`base.make_variant` / `raw_claim_score` and F22's `auroc`.
+
+**F26a — two scoring biases the smoke caught (the scaffold earning its keep).**
+(1) Whole-claim `mean_neglogp` is length-biased toward the long negation "I have no
+reliable record", so the model spuriously "prefers" abstention for EVERY question
+(known modal_correct 0.000). Fixed -> value-slot scoring. (2) Even slot-scored, the
+abstention still dominates because the SYSTEM PROMPT primes it (uniformly low
+surprisal). Fixed -> exclude negation, compare VALUE candidates only. Both are the
+Phase-0b negation-prior bias resurfacing in a new place.
+
+**F26b — THE finding: teacher-forced preference is stable BY CONSTRUCTION, so it
+cannot carry a consistency signal.** With the biases removed, the model's preferred
+VALUE is stability = 1.000 across paraphrases for BOTH known and unanswerable
+questions (AUROC 0.500 for every consistency signal). This is structural, not a
+tuning miss: argmin over teacher-forced candidate surprisal reads the PRIOR token
+ranking (Paris > Lyon by frequency), which shallow query paraphrases do not move —
+independent of whether the model "knows". Consistency-of-teacher-forced-preference
+measures prior stability, not knowledge.
+
+**F26c — the viable instrument is SAMPLING (real SelfCheckGPT), not teacher
+forcing.** What distinguishes known from confabulated is SAMPLING VARIANCE:
+generate k answers at temperature and measure agreement — a known fact is generated
+consistently, an unknown one varies. Teacher-forced argmax collapses that variance
+by construction. So the factual leg needs a generation loop + answer
+normalization/matching — a heavier, different mechanism than the teacher-forced
+rest of the monitor. That is a real architectural fork: legs 1 (surprisal) and 2
+(consistency) do not share an instrument.
+
+**Consequence / next build.** Keep the query-paraphrase family + eval harness
+(reusable); REPLACE `preferred_candidate` (teacher-forced) with `sample_answers`
+(temperature generation) + string-normalized agreement. Pre-register:
+agreement(known) > agreement(unanswerable) at AUROC >= .65 while min-surprisal is
+~chance. Then wire the router (context-derivable -> leg 1; factual -> leg 2).
+
+**Honest scope.** F26 is a NEGATIVE on the teacher-forced proxy — with the two
+biases and the structural reason nailed down and the correct instrument identified.
+It is NOT a verdict on whether consistency works; that needs the sampling build.
+Files: `loop/consistency.py`, `loop/f26_consistency.py`, `tests/test_consistency.py`.
+
 ## F25 — Hard-task setup for the dispersion axis: single-pass CEILINGS on
 ## in-context-verifiable tasks (short AND long ξ), so the murmuration axis has no
 ## headroom to exploit. The tasks with headroom are factual — where surprisal is
