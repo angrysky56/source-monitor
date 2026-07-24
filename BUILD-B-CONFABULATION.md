@@ -1,9 +1,27 @@
 # Build B — the confabulation task (the regime that justifies Leg 2)
 
-**Status:** co-designed spec (Ty + reviewer), 2026-07-23. **Not a cold-agent
-hand-off** — §4 (calibration) requires a human reading raw samples. The mechanism
-(§5) is agent-safe once the substrate exists. Companion: `BUILD-HANDOFF.md` §3,
-`FINDINGS.md` F26/F27.
+**⚠ REORIENTED by the F28-prep probes (2026-07-23). Read this first.** The two
+calibration probes this spec called for were run, and they narrowed Leg 2's role
+sharply: **self-consistency detects instability, not wrongness.** The model's
+confident systematic errors are STABLE (e.g. "35×85" → "3025" six times), so
+sampling variance is blind to them — that is Class 3, and it needs Leg 3 (external
+grounding), not Leg 2. Consequences for this spec:
+- Leg 2's real niche is NARROW: uncertainty-driven flailing (obscure recall the
+  model is unsure of), not systematic error. A Build B eval that demonstrates this
+  is still worth having, but it is a *measurement of a narrow niche*, not the
+  headline — the headline moved to `BUILD-C-GROUNDING.md`.
+- Before any Build B eval: **fix `distinct_ratio`** — it conflates surface/phrasing
+  variation with real uncertainty (probe 1: a correct-but-verbose answer scored
+  dr .67 and would false-flag). Cluster answers semantically or anchor on
+  correctness, not string-distinctness.
+- Positives must be UNSTABLE confabulations (the only kind Leg 2 can catch), sourced
+  from external-verified obscure recall — not math (math errors are stable) and not
+  the current too-easy bank (`ood/obscure_facts.py` is now a Known-*negatives* set).
+
+**Original status:** co-designed spec (Ty + reviewer), 2026-07-23. **Not a
+cold-agent hand-off** — §4 (calibration) requires a human reading raw samples.
+Companion: `BUILD-HANDOFF.md` §3, `FINDINGS.md` F26/F27/F28-prep,
+`BUILD-C-GROUNDING.md`.
 
 ---
 

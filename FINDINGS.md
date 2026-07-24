@@ -1,5 +1,66 @@
 # source-monitor — findings log
 
+## F28-prep — Build B probes: Leg 2 detects INSTABILITY, not WRONGNESS. A third
+## error class (stable confident error) is outside self-monitoring and needs
+## external grounding (Leg 3). (2026-07-23; Qwen3-1.7B, two calibration probes.)
+
+Build B aimed to find the regime where Leg 2 (sampled consistency) is *uniquely*
+necessary: confident confabulation on facts the model half-knows. Two throwaway
+calibration probes (`scripts/_confab_calibrate.py`, `scripts/_math_probe.py`) —
+does the confabulation zone populate, and can Leg 2 see it? Both are small/single-
+seed PROBES, not results; the direction they establish is what matters.
+
+**Probe 1 — obscure facts (`ood/obscure_facts.py`, n=60, k=6).** Zone split:
+52 KNOWN / 3 CONFAB / 0 REFUSAL / 5 BORDER.
+- Bank too easy — Qwen3-1.7B knows these (obscurer needed; but LLM-authored ground
+  truth on obscure facts is self-undermining — use external-verified data).
+- 0 refusals: the neutral prompt kept the model ATTEMPTING (no drift into F26's
+  refusal zone) — a design win worth keeping.
+- Surfaced a Leg-2 flaw: `distinct_ratio` conflates SURFACE variation with semantic
+  uncertainty. Poland's currency — all 6 samples correct ("złoty") but phrased 6
+  ways → dr .67 → would FALSE-FLAG a known fact. Leg 2 needs semantic clustering /
+  correctness-anchoring, not string-distinctness (the F26 normalization trap, load-
+  bearing).
+
+**Probe 2 — hard math (`scripts/_math_probe.py`, n=32, k=6; Python ground truth,
+numeric answers).** Zone split: 22 KNOWN / **1 CONFAB_UNSTABLE / 9 CONFAB_STABLE** /
+0 REFUSAL.
+- **THE finding: 9 of 10 confabulations are STABLE.** "35 × 85?" → the model answers
+  **"3025" six times** (truth 2975) — confidently, systematically, identically wrong
+  → dr .17 → Leg 2 blind. Generalizes the bromine→17 case (F28-prep probe 1's
+  BORDER note).
+- Mechanism: transformers compute DETERMINISTICALLY, so a wrong computation is the
+  *same* wrong answer every sample. No sampling variance ⇒ no Leg-2 signal.
+
+**Principle (load-bearing): self-consistency detects INSTABILITY, not WRONGNESS.**
+A systematic error is self-consistent by definition, so sampling variance cannot
+see it. Leg 2's niche is NARROW — uncertainty-driven flailing (obscure recall the
+model is unsure of; "capital of Burkina Faso?" → Conakry/Bamako/Bobo-Dioulasso),
+NOT confident systematic error.
+
+**The three error classes and the monitor's boundary:**
+- **Class 1 — context-contradicted** → Leg 1 (surprisal). Solved (F21e/F25).
+- **Class 2 — uncertainty-driven confabulation (unstable)** → Leg 2 (consistency).
+  Narrow but real (F26d).
+- **Class 3 — STABLE confident error** (systematic mis-computation / mis-belief) →
+  **NEITHER leg.** No internal signal of it exists — the system is confident and
+  consistent about its wrong answer. This is the most dangerous class (stated with
+  unwavering confidence) and it is provably outside self-examination.
+
+**Direction (chosen): Leg 3 — external grounding.** Class 3 requires an EXTERNAL
+oracle — retrieval for facts, a tool/calculator for math — i.e. F19d's "route to
+retrieval", now empirically FORCED rather than asserted. Self-examination
+(surprisal, ensemble, consistency) has a boundary and these probes located it: it
+cannot catch an error the model is confident and consistent about. The next real
+leg is external grounding; see `BUILD-C-GROUNDING.md`. Build B (Leg-2's narrow
+regime) is de-prioritized to a measurement, not a headline.
+
+Artifacts kept as evidence: `ood/obscure_facts.py` (a valid Known-negatives set,
+ground truth VERIFY-before-use), `scripts/_confab_calibrate.py`,
+`scripts/_math_probe.py`.
+
+---
+
 ## F27 — Build A: the router MECHANISM built, tested & validated (controls pass,
 ## oracle-leak-free); its demonstrated value is false-flag reduction + efficiency,
 ## NOT an AUROC win — that is owed to Build B. (2026-07-23; Qwen3-1.7B,
